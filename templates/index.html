@@ -1,0 +1,548 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>DemandIQ — Traffic Count Extraction</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --charcoal: #2F3640;
+    --charcoal-2: #4A5560;
+    --grey-1: #F4F6F8;
+    --grey-2: #CFD8DC;
+    --grey-3: #8A95A0;
+    --accent:  #1F6FB2;
+    --error:   #C62828;
+    --success: #2E7D32;
+    --bg:      #FAFBFC;
+    --white:   #FFFFFF;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'IBM Plex Sans', -apple-system, sans-serif;
+    color: var(--charcoal);
+    background: var(--bg);
+    font-size: 14px;
+    line-height: 1.5;
+    min-height: 100vh;
+  }
+
+  /* Header */
+  .header {
+    background: var(--charcoal);
+    color: var(--white);
+    padding: 20px 48px;
+    display: flex;
+    align-items: baseline;
+    gap: 18px;
+    border-bottom: 3px solid var(--accent);
+  }
+  .logo {
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+  }
+  .tagline {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    color: var(--grey-2);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .container {
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 40px 48px 80px;
+  }
+
+  /* Upload zone */
+  .upload-zone {
+    border: 2px dashed var(--grey-2);
+    background: var(--white);
+    border-radius: 4px;
+    padding: 56px 32px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  .upload-zone:hover,
+  .upload-zone.dragover {
+    border-color: var(--charcoal);
+    background: var(--grey-1);
+  }
+  .upload-icon {
+    font-size: 36px;
+    color: var(--grey-3);
+    margin-bottom: 12px;
+    line-height: 1;
+  }
+  .upload-text {
+    font-size: 15px;
+    color: var(--charcoal);
+    margin-bottom: 6px;
+    font-weight: 500;
+  }
+  .upload-hint {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    color: var(--grey-3);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+  #fileInput { display: none; }
+
+  /* File queue */
+  .file-list {
+    margin-top: 20px;
+    background: var(--white);
+    border: 1px solid var(--grey-2);
+    border-radius: 4px;
+    overflow: hidden;
+  }
+  .file-item {
+    padding: 11px 18px;
+    border-bottom: 1px solid var(--grey-1);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 13px;
+  }
+  .file-item:last-child { border-bottom: none; }
+  .file-name {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    color: var(--charcoal);
+  }
+  .file-status {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--grey-3);
+  }
+  .file-status.done       { color: var(--success); }
+  .file-status.error      { color: var(--error); }
+  .file-status.processing { color: var(--accent); }
+
+  /* Buttons */
+  .actions {
+    margin-top: 20px;
+    display: flex;
+    gap: 10px;
+  }
+  .btn {
+    font-family: 'IBM Plex Sans', sans-serif;
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    padding: 11px 22px;
+    border: none;
+    border-radius: 3px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  .btn-primary {
+    background: var(--charcoal);
+    color: var(--white);
+  }
+  .btn-primary:hover:not(:disabled) { background: var(--charcoal-2); }
+  .btn-primary:disabled {
+    background: var(--grey-2);
+    color: var(--grey-3);
+    cursor: not-allowed;
+  }
+  .btn-secondary {
+    background: var(--white);
+    color: var(--charcoal);
+    border: 1px solid var(--grey-2);
+  }
+  .btn-secondary:hover { background: var(--grey-1); }
+
+  /* Results */
+  .results-section { margin-top: 36px; }
+
+  .summary-bar {
+    background: var(--charcoal);
+    color: var(--white);
+    padding: 14px 22px;
+    display: flex;
+    align-items: center;
+    gap: 36px;
+    margin-bottom: 16px;
+    border-radius: 4px;
+  }
+  .summary-stat {
+    display: flex;
+    flex-direction: column;
+  }
+  .summary-stat .label {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--grey-2);
+    margin-bottom: 2px;
+  }
+  .summary-stat .value {
+    font-size: 20px;
+    font-weight: 600;
+  }
+  .summary-bar .right { margin-left: auto; }
+
+  .section-title {
+    font-size: 13px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--charcoal);
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom: 2px solid var(--charcoal);
+  }
+
+  .table-wrap {
+    overflow: auto;
+    border: 1px solid var(--grey-2);
+    border-radius: 4px;
+    max-height: 600px;
+    background: var(--white);
+  }
+
+  .results-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+  }
+  .results-table th {
+    background: var(--charcoal);
+    color: var(--white);
+    padding: 9px 8px;
+    text-align: left;
+    font-weight: 600;
+    font-size: 10px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    white-space: nowrap;
+  }
+  .results-table td {
+    padding: 7px 8px;
+    border-bottom: 1px solid var(--grey-1);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    white-space: nowrap;
+  }
+  .results-table tr:hover td { background: var(--grey-1); }
+  .results-table .col-name {
+    font-family: 'IBM Plex Sans', sans-serif;
+    font-weight: 500;
+    white-space: normal;
+    min-width: 200px;
+  }
+  .results-table .num { text-align: right; }
+  .results-table .muted { color: var(--grey-3); }
+
+  /* Errors */
+  .error-block {
+    background: #FFF5F5;
+    border-left: 3px solid var(--error);
+    padding: 10px 14px;
+    margin-bottom: 8px;
+    font-size: 13px;
+  }
+  .error-block strong {
+    color: var(--error);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+  }
+
+  /* Spinner */
+  .spinner {
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    border: 2px solid rgba(255,255,255,0.3);
+    border-top-color: var(--white);
+    border-radius: 50%;
+    animation: spin 0.6s linear infinite;
+    vertical-align: -2px;
+    margin-right: 8px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="logo">DemandIQ</div>
+  <div class="tagline">Traffic Count Extraction</div>
+</div>
+
+<div class="container">
+
+  <div class="upload-zone" id="uploadZone">
+    <div class="upload-icon">↑</div>
+    <div class="upload-text">Drop count files here or click to browse</div>
+    <div class="upload-hint">XLSX · XLS · PDF · CSV — bulk upload supported</div>
+    <input type="file" id="fileInput" multiple accept=".xlsx,.xls,.pdf,.csv">
+  </div>
+
+  <div id="fileList" class="file-list hidden"></div>
+
+  <div id="actions" class="actions hidden">
+    <button id="processBtn" class="btn btn-primary">Extract Counts</button>
+    <button id="clearBtn" class="btn btn-secondary">Clear</button>
+  </div>
+
+  <div id="resultsSection" class="results-section hidden">
+    <div class="summary-bar">
+      <div class="summary-stat">
+        <div class="label">Files</div>
+        <div class="value" id="statFiles">0</div>
+      </div>
+      <div class="summary-stat">
+        <div class="label">Intersections</div>
+        <div class="value" id="statIntersections">0</div>
+      </div>
+      <div class="summary-stat">
+        <div class="label">Errors</div>
+        <div class="value" id="statErrors">0</div>
+      </div>
+      <div class="right">
+        <button id="downloadBtn" class="btn btn-primary">Download Excel</button>
+      </div>
+    </div>
+
+    <div id="errorList"></div>
+
+    <h3 class="section-title">Extracted Data</h3>
+    <div class="table-wrap">
+      <table class="results-table" id="resultsTable">
+        <thead></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+
+<script>
+const MOVEMENTS = ['EBU','EBL','EBT','EBR','WBU','WBL','WBT','WBR','NBU','NBL','NBT','NBR','SBU','SBL','SBT','SBR'];
+
+let selectedFiles = [];
+let lastResults = null;
+
+const $ = id => document.getElementById(id);
+const uploadZone = $('uploadZone');
+const fileInput  = $('fileInput');
+const fileList   = $('fileList');
+const actions    = $('actions');
+const processBtn = $('processBtn');
+const clearBtn   = $('clearBtn');
+const resultsSec = $('resultsSection');
+const downloadBtn= $('downloadBtn');
+
+uploadZone.addEventListener('click', () => fileInput.click());
+uploadZone.addEventListener('dragover', e => {
+  e.preventDefault();
+  uploadZone.classList.add('dragover');
+});
+uploadZone.addEventListener('dragleave', () => uploadZone.classList.remove('dragover'));
+uploadZone.addEventListener('drop', e => {
+  e.preventDefault();
+  uploadZone.classList.remove('dragover');
+  addFiles(e.dataTransfer.files);
+});
+fileInput.addEventListener('change', e => addFiles(e.target.files));
+
+clearBtn.addEventListener('click', () => {
+  selectedFiles = [];
+  lastResults = null;
+  fileInput.value = '';
+  renderFileList();
+  resultsSec.classList.add('hidden');
+});
+
+function addFiles(files) {
+  for (const f of files) selectedFiles.push(f);
+  renderFileList();
+}
+
+function renderFileList() {
+  if (!selectedFiles.length) {
+    fileList.classList.add('hidden');
+    actions.classList.add('hidden');
+    return;
+  }
+  fileList.classList.remove('hidden');
+  actions.classList.remove('hidden');
+  fileList.innerHTML = selectedFiles.map((f, i) => `
+    <div class="file-item" data-idx="${i}">
+      <span class="file-name">${escapeHtml(f.name)}</span>
+      <span class="file-status">${formatSize(f.size)}</span>
+    </div>
+  `).join('');
+}
+
+function formatSize(b) {
+  if (b < 1024) return b + ' B';
+  if (b < 1024*1024) return (b/1024).toFixed(1) + ' KB';
+  return (b/1024/1024).toFixed(1) + ' MB';
+}
+
+function escapeHtml(s) {
+  const d = document.createElement('div');
+  d.textContent = s == null ? '' : String(s);
+  return d.innerHTML;
+}
+
+processBtn.addEventListener('click', async () => {
+  if (!selectedFiles.length) return;
+
+  processBtn.disabled = true;
+  processBtn.innerHTML = '<span class="spinner"></span>Processing…';
+
+  document.querySelectorAll('.file-item').forEach(el => {
+    const s = el.querySelector('.file-status');
+    s.className = 'file-status processing';
+    s.textContent = 'Processing';
+  });
+
+  const fd = new FormData();
+  for (const f of selectedFiles) fd.append('files', f);
+
+  try {
+    const r = await fetch('/extract', { method: 'POST', body: fd });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const data = await r.json();
+    lastResults = data;
+    updateFileStatuses(data);
+    renderResults(data);
+  } catch (e) {
+    alert('Extraction failed: ' + e.message);
+  } finally {
+    processBtn.disabled = false;
+    processBtn.textContent = 'Extract Counts';
+  }
+});
+
+function updateFileStatuses(data) {
+  const errMap = {};
+  for (const e of (data.errors || [])) errMap[e.file] = true;
+
+  document.querySelectorAll('.file-item').forEach(el => {
+    const idx = parseInt(el.dataset.idx);
+    const name = selectedFiles[idx].name;
+    const s = el.querySelector('.file-status');
+    if (errMap[name]) {
+      s.className = 'file-status error';
+      s.textContent = 'Failed';
+    } else {
+      s.className = 'file-status done';
+      s.textContent = 'Done';
+    }
+  });
+}
+
+function renderResults(data) {
+  resultsSec.classList.remove('hidden');
+
+  const results = data.results || [];
+  const errors  = data.errors  || [];
+
+  let totalInter = 0;
+  for (const r of results) totalInter += (r.intersections || []).length;
+
+  $('statFiles').textContent         = results.length;
+  $('statIntersections').textContent = totalInter;
+  $('statErrors').textContent        = errors.length;
+
+  $('errorList').innerHTML = errors.map(e => `
+    <div class="error-block"><strong>${escapeHtml(e.file)}</strong> — ${escapeHtml(e.error)}</div>
+  `).join('');
+
+  const headers = ['File', 'Vendor', 'Intersection', 'AM Peak', 'PM Peak'];
+  for (const m of MOVEMENTS) headers.push('AM ' + m);
+  for (const m of MOVEMENTS) headers.push('PM ' + m);
+  headers.push('PHF AM', 'PHF PM', 'HV% AM', 'HV% PM');
+
+  document.querySelector('#resultsTable thead').innerHTML =
+    '<tr>' + headers.map(h => `<th>${h}</th>`).join('') + '</tr>';
+
+  const rows = [];
+  for (const r of results) {
+    for (const inter of (r.intersections || [])) {
+      const amVol = (inter.volumes && inter.volumes.AM) || {};
+      const pmVol = (inter.volumes && inter.volumes.PM) || {};
+      const phf   = inter.phf    || {};
+      const hv    = inter.hv_pct || {};
+
+      const cells = [
+        { v: r.source_file || '',         cls: '' },
+        { v: r.vendor_detected || '',     cls: '' },
+        { v: inter.name || '',            cls: 'col-name' },
+        { v: inter.am_peak_start || '—',  cls: '' },
+        { v: inter.pm_peak_start || '—',  cls: '' },
+      ];
+      for (const m of MOVEMENTS) cells.push({ v: fmt(amVol[m]), cls: 'num' + (amVol[m] == null ? ' muted' : '') });
+      for (const m of MOVEMENTS) cells.push({ v: fmt(pmVol[m]), cls: 'num' + (pmVol[m] == null ? ' muted' : '') });
+      cells.push({ v: fmt(phf.AM),  cls: 'num' });
+      cells.push({ v: fmt(phf.PM),  cls: 'num' });
+      cells.push({ v: fmt(hv.AM),   cls: 'num' });
+      cells.push({ v: fmt(hv.PM),   cls: 'num' });
+
+      rows.push('<tr>' + cells.map(c =>
+        `<td class="${c.cls}">${escapeHtml(c.v)}</td>`
+      ).join('') + '</tr>');
+    }
+  }
+  document.querySelector('#resultsTable tbody').innerHTML = rows.join('');
+
+  resultsSec.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function fmt(v) {
+  if (v === null || v === undefined || v === '') return '—';
+  return String(v);
+}
+
+downloadBtn.addEventListener('click', async () => {
+  if (!lastResults) return;
+  downloadBtn.disabled = true;
+  downloadBtn.innerHTML = '<span class="spinner"></span>Generating…';
+
+  try {
+    const r = await fetch('/excel', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(lastResults)
+    });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const blob = await r.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'demandiq_results.xlsx';
+    a.click();
+    URL.revokeObjectURL(url);
+  } catch (e) {
+    alert('Download failed: ' + e.message);
+  } finally {
+    downloadBtn.disabled = false;
+    downloadBtn.textContent = 'Download Excel';
+  }
+});
+</script>
+
+</body>
+</html>
