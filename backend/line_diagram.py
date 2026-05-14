@@ -86,67 +86,123 @@ def _single_cell_preset(fig_inches=4.0):
     }
 
 
-# ── Arrow primitives (locked from v26) ─────────────────────────────────────────
-def _dg_arrow(ax, x0, y0, x1, y1, curve=0.0, lw=2.5, hw=0.019, hl=0.019):
-    """Draw a (optionally bezier-curved) arrow in DG_GREY."""
-    if curve == 0:
-        dx = x1 - x0; dy = y1 - y0; ln = np.sqrt(dx**2 + dy**2)
-        if ln < 1e-6: return
-        sx = x1 - (hl * dx / ln); sy = y1 - (hl * dy / ln)
-        ax.plot([x0, sx], [y0, sy], color=DG_GREY, lw=lw,
-                solid_capstyle='round', zorder=8)
-        a = np.arctan2(dy, dx); tip = np.array([x1, y1])
-        L = tip + hw * np.array([-np.sin(a), np.cos(a)]) - hl * np.array([np.cos(a), np.sin(a)])
-        R = tip - hw * np.array([-np.sin(a), np.cos(a)]) - hl * np.array([np.cos(a), np.sin(a)])
-        ax.add_patch(MplPolygon([tip, L, R], closed=True,
-                     facecolor=DG_GREY, edgecolor=DG_GREY, lw=0.5, zorder=9))
-    else:
-        mx = (x0 + x1) / 2; my = (y0 + y1) / 2; dx = x1 - x0; dy = y1 - y0
-        px = -dy; py = dx; n = np.sqrt(px**2 + py**2)
-        if n > 0: px /= n; py /= n
-        cx2 = mx + curve * px; cy2 = my + curve * py
-        t = np.linspace(0, 0.85, 40)
-        xs = (1 - t)**2 * x0 + 2 * (1 - t) * t * cx2 + t**2 * x1
-        ys = (1 - t)**2 * y0 + 2 * (1 - t) * t * cy2 + t**2 * y1
-        ax.plot(xs, ys, color=DG_GREY, lw=lw, solid_capstyle='round', zorder=8)
-        te = 0.92
-        tx = 2 * (1 - te) * (cx2 - x0) + 2 * te * (x1 - cx2)
-        ty = 2 * (1 - te) * (cy2 - y0) + 2 * te * (y1 - cy2)
-        a = np.arctan2(ty, tx); tip = np.array([x1, y1])
-        L = tip + hw * np.array([-np.sin(a), np.cos(a)]) - hl * np.array([np.cos(a), np.sin(a)])
-        R = tip - hw * np.array([-np.sin(a), np.cos(a)]) - hl * np.array([np.cos(a), np.sin(a)])
-        ax.add_patch(MplPolygon([tip, L, R], closed=True,
-                     facecolor=DG_GREY, edgecolor=DG_GREY, lw=0.5, zorder=9))
+# ── Arrow primitives ───────────────────────────────────────────────────────────
+def _dg_arrow(ax, points, lw=2.5, hw=0.019, hl=0.019):
+    """Draw a MUTCD-style polyline arrow in DG_GREY.
+
+    `points`: list of (x, y) tuples — at least 2 points. Arrowhead placed at
+    the final point, oriented along the final segment.
+    """
+    if not points or len(points) < 2:
+        return
+    x_last, y_last = points[-1]
+    x_prev, y_prev = points[-2]
+    dx = x_last - x_prev
+    dy = y_last - y_prev
+    ln = np.sqrt(dx * dx + dy * dy)
+    if ln < 1e-6:
+        return
+
+    # Trim the last segment so the line doesn't run into the arrowhead.
+    sx = x_last - (hl * dx / ln)
+    sy = y_last - (hl * dy / ln)
+    xs = [p[0] for p in points[:-1]] + [sx]
+    ys = [p[1] for p in points[:-1]] + [sy]
+    ax.plot(xs, ys, color=DG_GREY, lw=lw,
+            solid_capstyle='round', solid_joinstyle='miter', zorder=8)
+
+    # Arrowhead triangle at the final tip
+    a = np.arctan2(dy, dx)
+    tip = np.array([x_last, y_last])
+    L = tip + hw * np.array([-np.sin(a),  np.cos(a)]) - hl * np.array([np.cos(a), np.sin(a)])
+    R = tip - hw * np.array([-np.sin(a),  np.cos(a)]) - hl * np.array([np.cos(a), np.sin(a)])
+    ax.add_patch(MplPolygon([tip, L, R], closed=True,
+                 facecolor=DG_GREY, edgecolor=DG_GREY, lw=0.5, zorder=9))
 
 
 def _dg_get_arrow(ap, mv, cx, cy, s):
-    """Arrow start/end/curve geometry — approved from v26. s = arrow shaft scale."""
-    c = DG_C
-    if ap == 'NB':
-        if mv == 'L': return cx,        cy - s * 0.35, cx - s * 0.9, cy + s * 0.4, -c
-        if mv == 'T': return cx,        cy - s * 0.5,  cx,           cy + s * 0.5,  0
-        if mv == 'R': return cx,        cy - s * 0.35, cx + s * 0.9, cy + s * 0.4, +c
-    elif ap == 'SB':
-        if mv == 'L': return cx,        cy + s * 0.35, cx + s * 0.9, cy - s * 0.4, -c
-        if mv == 'T': return cx,        cy + s * 0.5,  cx,           cy - s * 0.5,  0
-        if mv == 'R': return cx,        cy + s * 0.35, cx - s * 0.9, cy - s * 0.4, +c
-    elif ap == 'EB':
-        if mv == 'L': return cx - s * 0.35, cy,        cx + s * 0.4, cy + s * 0.9, -c
-        if mv == 'T': return cx - s * 0.5,  cy,        cx + s * 0.5, cy,            0
-        if mv == 'R': return cx - s * 0.35, cy,        cx + s * 0.4, cy - s * 0.9, +c
-    elif ap == 'WB':
-        if mv == 'L': return cx + s * 0.35, cy,        cx - s * 0.4, cy - s * 0.9, -c
-        if mv == 'T': return cx + s * 0.5,  cy,        cx - s * 0.5, cy,            0
-        if mv == 'R': return cx + s * 0.35, cy,        cx - s * 0.4, cy + s * 0.9, +c
+    """Return polyline points [(x, y), ...] for one movement arrow.
+
+    MUTCD-style right-angle polylines for L/R, a single segment for T, and a
+    ∩-shaped 4-point loop for U-turns with the arrowhead pointing back the
+    way the vehicle came from. (cx, cy) is the lane position; everything is
+    relative to that.
+    """
+    if ap == 'NB':                                # vehicle flow: south → north
+        if mv == 'T':
+            return [(cx, cy - s * 0.5), (cx, cy + s * 0.5)]
+        if mv == 'L':                              # bend west
+            return [(cx, cy - s * 0.5), (cx, cy + s * 0.15), (cx - s * 0.9, cy + s * 0.15)]
+        if mv == 'R':                              # bend east
+            return [(cx, cy - s * 0.5), (cx, cy + s * 0.15), (cx + s * 0.9, cy + s * 0.15)]
+        if mv == 'U':                              # loop WEST (driver's left), return south
+            return [
+                (cx,            cy - s * 0.5),
+                (cx,            cy + s * 0.35),
+                (cx - s * 0.40, cy + s * 0.35),
+                (cx - s * 0.40, cy - s * 0.5),
+            ]
+    elif ap == 'SB':                              # vehicle flow: north → south
+        if mv == 'T':
+            return [(cx, cy + s * 0.5), (cx, cy - s * 0.5)]
+        if mv == 'L':                              # bend east (driver's left on SB)
+            return [(cx, cy + s * 0.5), (cx, cy - s * 0.15), (cx + s * 0.9, cy - s * 0.15)]
+        if mv == 'R':                              # bend west
+            return [(cx, cy + s * 0.5), (cx, cy - s * 0.15), (cx - s * 0.9, cy - s * 0.15)]
+        if mv == 'U':                              # loop EAST (driver's left), return north
+            return [
+                (cx,            cy + s * 0.5),
+                (cx,            cy - s * 0.35),
+                (cx + s * 0.40, cy - s * 0.35),
+                (cx + s * 0.40, cy + s * 0.5),
+            ]
+    elif ap == 'EB':                              # vehicle flow: west → east
+        if mv == 'T':
+            return [(cx - s * 0.5, cy), (cx + s * 0.5, cy)]
+        if mv == 'L':                              # bend north
+            return [(cx - s * 0.5, cy), (cx + s * 0.15, cy), (cx + s * 0.15, cy + s * 0.9)]
+        if mv == 'R':                              # bend south
+            return [(cx - s * 0.5, cy), (cx + s * 0.15, cy), (cx + s * 0.15, cy - s * 0.9)]
+        if mv == 'U':                              # loop NORTH (driver's left), return west
+            return [
+                (cx - s * 0.5,  cy),
+                (cx + s * 0.35, cy),
+                (cx + s * 0.35, cy + s * 0.40),
+                (cx - s * 0.5,  cy + s * 0.40),
+            ]
+    elif ap == 'WB':                              # vehicle flow: east → west
+        if mv == 'T':
+            return [(cx + s * 0.5, cy), (cx - s * 0.5, cy)]
+        if mv == 'L':                              # bend south
+            return [(cx + s * 0.5, cy), (cx - s * 0.15, cy), (cx - s * 0.15, cy - s * 0.9)]
+        if mv == 'R':                              # bend north
+            return [(cx + s * 0.5, cy), (cx - s * 0.15, cy), (cx - s * 0.15, cy + s * 0.9)]
+        if mv == 'U':                              # loop SOUTH (driver's left), return east
+            return [
+                (cx + s * 0.5,  cy),
+                (cx - s * 0.35, cy),
+                (cx - s * 0.35, cy - s * 0.40),
+                (cx + s * 0.5,  cy - s * 0.40),
+            ]
     return None
 
 
 def _dg_lane_positions(ap, qcx, qcy, sp):
-    """Lane positions median→curb for each approach."""
-    if   ap == 'NB': return [('L', qcx - sp, qcy), ('T', qcx, qcy), ('R', qcx + sp, qcy)]
-    elif ap == 'SB': return [('L', qcx + sp, qcy), ('T', qcx, qcy), ('R', qcx - sp, qcy)]
-    elif ap == 'EB': return [('L', qcx, qcy + sp), ('T', qcx, qcy), ('R', qcx, qcy - sp)]
-    elif ap == 'WB': return [('L', qcx, qcy - sp), ('T', qcx, qcy), ('R', qcx, qcy + sp)]
+    """Lane positions median→curb for each approach. U-turn sits 2.5 slots
+    beyond cluster centre on the median side, giving the U's return shaft
+    clearance from the L turn's horizontal bend."""
+    if ap == 'NB':
+        return [('L', qcx - sp,       qcy), ('T', qcx, qcy), ('R', qcx + sp, qcy),
+                ('U', qcx - 2.5 * sp, qcy)]
+    elif ap == 'SB':
+        return [('L', qcx + sp,       qcy), ('T', qcx, qcy), ('R', qcx - sp, qcy),
+                ('U', qcx + 2.5 * sp, qcy)]
+    elif ap == 'EB':
+        return [('L', qcx, qcy + sp),       ('T', qcx, qcy), ('R', qcx, qcy - sp),
+                ('U', qcx, qcy + 2.5 * sp)]
+    elif ap == 'WB':
+        return [('L', qcx, qcy - sp),       ('T', qcx, qcy), ('R', qcx, qcy + sp),
+                ('U', qcx, qcy - 2.5 * sp)]
     return []
 
 
@@ -193,11 +249,10 @@ def _dg_draw_approach(ax, ap, cx, cy, u_vols, b_vols, p, label_fn):
     fs  = p['fs_vol']
 
     for mv, ax_, ay_ in lanes:
-        geom = _dg_get_arrow(ap, mv, ax_, ay_, s)
-        if geom is None:
+        points = _dg_get_arrow(ap, mv, ax_, ay_, s)
+        if not points:
             continue
-        x0, y0, x1, y1, cv = geom
-        _dg_arrow(ax, x0, y0, x1, y1, curve=cv, lw=lw, hw=hw, hl=hl)
+        _dg_arrow(ax, points, lw=lw, hw=hw, hl=hl)
         key = f"{ap}{mv}"
         u = int(u_vols.get(key, 0) or 0)
         b = int(b_vols.get(key, 0) or 0)
