@@ -184,6 +184,65 @@ export function applyExtractedVolumes(intersectionId, payload) {
   setIntersections(list)
 }
 
+// ── S5 balancing settings ─────────────────────────────────────────────────────
+export function getBalancing() {
+  return getSnapshot().balancing ?? null
+}
+
+// Shallow-merge into state.balancing.
+export function setBalancing(partial) {
+  if (!_initialized) _initSnapshot()
+  const cur = _snapshot.balancing ?? {}
+  _snapshot = { ..._snapshot, balancing: { ...cur, ...partial } }
+  _persist()
+  _emit()
+}
+
+export function setLinkBalanceMode(linkId, mode, threshold) {
+  if (!_initialized) _initSnapshot()
+  const cur = _snapshot.balancing ?? {}
+  const linkBalanceModes = {
+    ...(cur.linkBalanceModes ?? {}),
+    [linkId]: { mode, threshold },
+  }
+  _snapshot = { ..._snapshot, balancing: { ...cur, linkBalanceModes } }
+  _persist()
+  _emit()
+}
+
+// Idempotent — fills in any missing fields with defaults; preserves user edits.
+// Generates default linkBalanceModes for every consecutive S2-sorted intersection pair.
+export function ensureBalancingDefaults() {
+  if (!_initialized) _initSnapshot()
+  const cur = _snapshot.balancing ?? {}
+  const corridorDir =
+    cur.corridorDir ??
+    (_snapshot.analysis?.corridorDir === 'NS' ? 'NB/SB' : 'EB/WB')
+
+  const intersections = _snapshot.intersections ?? []
+  const defaultLinkModes = {}
+  for (let i = 0; i < intersections.length - 1; i++) {
+    const id = `${intersections[i].id}__${intersections[i + 1].id}`
+    defaultLinkModes[id] = { mode: 'Full', threshold: 0 }
+  }
+
+  const merged = {
+    enabled: cur.enabled ?? true,
+    corridorDir,
+    peakMode: cur.peakMode ?? 'Corridor',
+    amWindow: cur.amWindow ?? { start: '07:00', end: '09:00' },
+    pmWindow: cur.pmWindow ?? { start: '16:00', end: '18:00' },
+    convergenceThreshold: cur.convergenceThreshold ?? 0.01,
+    maxIterations: cur.maxIterations ?? 200,
+    linkBalanceModes: { ...defaultLinkModes, ...(cur.linkBalanceModes ?? {}) },
+  }
+
+  if (JSON.stringify(merged) === JSON.stringify(cur)) return
+  _snapshot = { ..._snapshot, balancing: merged }
+  _persist()
+  _emit()
+}
+
 // ── Original API (preserved) ──────────────────────────────────────────────────
 export function loadProject() {
   const snap = getSnapshot()

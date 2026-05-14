@@ -32,3 +32,14 @@ export function detectCorridorDir(points) {
 export function sortAlongCorridor(points, dir) {
   return [...points].sort((a, b) => (dir === 'EW' ? a.lng - b.lng : a.lat - b.lat))
 }
+
+// Great-circle distance between two {lat,lng} in miles.
+export function haversineMi(p1, p2) {
+  const R = 3958.8 // Earth radius in miles
+  const φ1 = (p1.lat * Math.PI) / 180
+  const φ2 = (p2.lat * Math.PI) / 180
+  const Δφ = ((p2.lat - p1.lat) * Math.PI) / 180
+  const Δλ = ((p2.lng - p1.lng) * Math.PI) / 180
+  const a = Math.sin(Δφ / 2) ** 2 + Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) ** 2
+  return 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+}
