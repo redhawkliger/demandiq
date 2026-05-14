@@ -285,6 +285,19 @@ export function getLastRun() {
   return getSnapshot().analysis?.lastRun ?? null
 }
 
+// ── S7 results view (period + viewMode persistence) ───────────────────────────
+export function getResultsView() {
+  return getSnapshot().results ?? null
+}
+
+export function setResultsView(partial) {
+  if (!_initialized) _initSnapshot()
+  const cur = _snapshot.results ?? {}
+  _snapshot = { ..._snapshot, results: { ...cur, ...partial } }
+  _persist()
+  _emit()
+}
+
 // ── Original API (preserved) ──────────────────────────────────────────────────
 export function loadProject() {
   const snap = getSnapshot()
