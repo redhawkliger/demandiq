@@ -108,6 +108,82 @@ export function isIntersectionConfigured(intersectionId) {
   return true
 }
 
+// ── S4 volumes ────────────────────────────────────────────────────────────────
+export function getVolumes(intersectionId) {
+  const it = getIntersections().find((x) => x.id === intersectionId)
+  return it?.volumes ?? null
+}
+
+// Bulk replace one period's volumes (rare — used by tests / restores).
+export function setVolumes(intersectionId, period, volumes) {
+  const list = getIntersections().map((it) => {
+    if (it.id !== intersectionId) return it
+    return { ...it, volumes: { ...(it.volumes ?? {}), [period]: volumes } }
+  })
+  setIntersections(list)
+}
+
+// Single cell. value === null/'' → delete the cell. source = 'agent' | 'manual'.
+export function setCellValue(intersectionId, period, movement, value, source) {
+  const list = getIntersections().map((it) => {
+    if (it.id !== intersectionId) return it
+    const periodVols = { ...((it.volumes ?? {})[period] ?? {}) }
+    if (value === null || value === '' || value === undefined) {
+      delete periodVols[movement]
+    } else {
+      periodVols[movement] = { value, _source: source }
+    }
+    return { ...it, volumes: { ...(it.volumes ?? {}), [period]: periodVols } }
+  })
+  setIntersections(list)
+}
+
+export function setPhf(intersectionId, period, value) {
+  const list = getIntersections().map((it) =>
+    it.id === intersectionId ? { ...it, phf: { ...(it.phf ?? {}), [period]: value } } : it
+  )
+  setIntersections(list)
+}
+
+export function setHvPct(intersectionId, period, value) {
+  const list = getIntersections().map((it) =>
+    it.id === intersectionId ? { ...it, hvPct: { ...(it.hvPct ?? {}), [period]: value } } : it
+  )
+  setIntersections(list)
+}
+
+// Apply one agent-extracted intersection block (from the /api/extract response)
+// to a project intersection. Wraps every numeric value as { value, _source: 'agent' }.
+export function applyExtractedVolumes(intersectionId, payload) {
+  const wrap = (raw) => {
+    const out = {}
+    if (!raw) return out
+    for (const [mvt, val] of Object.entries(raw)) {
+      if (val !== null && val !== undefined) {
+        out[mvt] = { value: val, _source: 'agent' }
+      }
+    }
+    return out
+  }
+  const list = getIntersections().map((it) => {
+    if (it.id !== intersectionId) return it
+    return {
+      ...it,
+      volumes: {
+        AM: wrap(payload.volumes?.AM),
+        PM: wrap(payload.volumes?.PM),
+      },
+      phf: payload.phf ?? it.phf ?? null,
+      hvPct: payload.hv_pct ?? it.hvPct ?? null,
+      vendorDetected: payload.vendorDetected ?? it.vendorDetected,
+      sourceFile: payload.sourceFile ?? it.sourceFile,
+      amPeakStart: payload.am_peak_start ?? it.amPeakStart,
+      pmPeakStart: payload.pm_peak_start ?? it.pmPeakStart,
+    }
+  })
+  setIntersections(list)
+}
+
 // ── Original API (preserved) ──────────────────────────────────────────────────
 export function loadProject() {
   const snap = getSnapshot()
