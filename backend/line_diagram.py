@@ -297,6 +297,13 @@ def _dg_draw_cell(ax, geo, u_vols, b_vols, p, label_fn):
     if 'Signal' in control:
         ax.add_patch(MplCircle((cx, cy), 0.022, facecolor=DG_WHITE,
                      edgecolor=DG_BLACK, lw=1.5, zorder=6))
+    elif 'Roundabout' in control:
+        # Outer ring (same size as signal circle, white fill).
+        ax.add_patch(MplCircle((cx, cy), 0.022, facecolor=DG_WHITE,
+                     edgecolor=DG_BLACK, lw=1.5, zorder=6))
+        # Inner filled circle — central island, ~half radius.
+        ax.add_patch(MplCircle((cx, cy), 0.010, facecolor=DG_BLACK,
+                     edgecolor=DG_BLACK, lw=0.5, zorder=7))
     else:
         ax.plot(cx, cy, 'k.', markersize=4, zorder=6)
         for ap in geo.get('stopped_approaches', []):

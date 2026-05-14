@@ -1,10 +1,18 @@
 import { useEffect, useState } from 'react'
+import { Target } from 'lucide-react'
 
 const CONTROL_TYPES = [
   { key: 'Signalized',    label: '🚦 Signalized' },
   { key: 'Two-way stop',  label: '🛑 Two-way stop' },
   { key: 'All-way stop',  label: '🛑 All-way stop' },
-  { key: 'Roundabout',    label: '⟳ Roundabout' },
+  {
+    key: 'Roundabout',
+    label: (
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+        <Target size={14} /> Roundabout
+      </span>
+    ),
+  },
 ]
 const LEGS = ['3-leg', '4-leg']
 const DIRS = ['EB/WB', 'NB/SB', 'NE/SW', 'NW/SE']
