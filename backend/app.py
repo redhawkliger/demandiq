@@ -14,6 +14,7 @@ APP_PASSWORD in the Environment tab.
 
 import os
 import io
+import base64
 import secrets
 import tempfile
 from pathlib import Path
@@ -29,6 +30,7 @@ from openpyxl.styles import Font, Alignment, PatternFill
 
 from count_agent import extract, MOVEMENTS
 from balancer import balance_corridor, run_qc
+from line_diagram import render_single_diagram, VIEW_MODES, FIG_INCHES, DPI
 
 # ── Config ────────────────────────────────────────────────────────────────────
 API_KEY = os.getenv("ANTHROPIC_API_KEY")
@@ -290,6 +292,44 @@ async def balance_endpoint(payload: dict):
             "PM": pm_adj,
         },
         "qc_flags": qc_flags,
+    }
+
+
+@app.post("/line-diagram", dependencies=[Depends(require_auth)])
+async def line_diagram_endpoint(payload: dict):
+    """Render one intersection as a PNG line diagram.
+
+    Wraps backend/line_diagram.render_single_diagram. Returns the PNG as
+    base64 inside JSON so the frontend can drop it into an <img src=...>
+    without an extra round-trip.
+    """
+    intersection = payload.get("intersection")
+    if not isinstance(intersection, dict) or "num" not in intersection:
+        raise HTTPException(status_code=400, detail="intersection must be a dict with 'num'")
+
+    u_vols = payload.get("u_vols", {}) or {}
+    b_vols = payload.get("b_vols", {}) or {}
+    if not isinstance(u_vols, dict) or not isinstance(b_vols, dict):
+        raise HTTPException(status_code=400, detail="u_vols and b_vols must be dicts")
+
+    view_mode = payload.get("view_mode", "combined")
+    if view_mode not in VIEW_MODES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"view_mode must be one of {VIEW_MODES}",
+        )
+
+    try:
+        png_bytes = render_single_diagram(intersection, u_vols, b_vols, view_mode)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"render failed: {e}")
+
+    px = int(FIG_INCHES * DPI)
+    return {
+        "intersection_num": intersection["num"],
+        "png_base64": base64.b64encode(png_bytes).decode("ascii"),
+        "width": px,
+        "height": px,
     }
 
 
