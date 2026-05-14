@@ -14,6 +14,7 @@ APP_PASSWORD in the Environment tab.
 
 import os
 import io
+import re
 import base64
 import secrets
 import tempfile
@@ -31,6 +32,7 @@ from openpyxl.styles import Font, Alignment, PatternFill
 from count_agent import extract, MOVEMENTS
 from balancer import balance_corridor, run_qc
 from line_diagram import render_single_diagram, VIEW_MODES, FIG_INCHES, DPI
+from excel_export import build_workbook
 
 # ── Config ────────────────────────────────────────────────────────────────────
 API_KEY = os.getenv("ANTHROPIC_API_KEY")
@@ -331,6 +333,34 @@ async def line_diagram_endpoint(payload: dict):
         "width": px,
         "height": px,
     }
+
+
+@app.post("/export-excel", dependencies=[Depends(require_auth)])
+async def export_excel_endpoint(payload: dict):
+    """Generate the full 8-sheet Excel workbook from the project snapshot.
+
+    Accepts the same shape the frontend persists to localStorage as
+    'demandiq:project'. Returns an .xlsx as a binary stream.
+    """
+    project = payload.get("project") or {}
+    name = (project.get("name") or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="project.name required")
+
+    try:
+        xlsx_bytes = build_workbook(payload)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"workbook build failed: {e}")
+
+    safe_name = re.sub(r"[^a-zA-Z0-9_-]+", "_", name).strip("_") or "project"
+
+    return StreamingResponse(
+        io.BytesIO(xlsx_bytes),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={
+            "Content-Disposition": f'attachment; filename="{safe_name}.xlsx"',
+        },
+    )
 
 
 @app.get("/health")

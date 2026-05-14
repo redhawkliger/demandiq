@@ -1,0 +1,191 @@
+/* ── S8 layout ────────────────────────────────────────────────────────── */
+.di-s8 {
+  margin: -24px -32px;
+  height: calc(100% + 48px);
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-base);
+}
+.di-s8__body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 32px 40px;
+}
+.di-s8__inner {
+  max-width: 880px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+}
+.di-s8__footer {
+  flex-shrink: 0;
+  height: 64px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-elevated);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 24px;
+  gap: 16px;
+}
+.di-s8__done {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+.di-s8--center { align-items: center; justify-content: center; }
+
+/* ── Summary card ─────────────────────────────────────────────────────── */
+.di-s8-summary {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 24px 28px;
+}
+.di-s8-summary__eyebrow {
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  font-weight: 500;
+}
+.di-s8-summary__title {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 28px;
+  letter-spacing: -0.01em;
+  color: var(--text-primary);
+  margin: 8px 0 16px;
+}
+.di-s8-summary__grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px 28px;
+}
+.di-s8-summary__row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  border-bottom: 1px solid var(--border);
+  padding: 6px 0;
+}
+.di-s8-summary__k { color: var(--text-secondary); }
+.di-s8-summary__v { color: var(--text-primary); font-weight: 500; font-variant-numeric: tabular-nums; }
+
+/* ── Filename input ──────────────────────────────────────────────────── */
+.di-s8-filename {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.di-s8-filename__label {
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+.di-s8-filename__hint {
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+/* ── Export cards 2x2 ─────────────────────────────────────────────────── */
+.di-s8-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+.di-s8-card {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 20px 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 200px;
+  transition: border-color 120ms, background 120ms;
+}
+.di-s8-card--phase2 { opacity: 0.6; }
+
+.di-s8-card__head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.di-s8-card__icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  background: var(--bg-base);
+  border: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent);
+  flex-shrink: 0;
+}
+.di-s8-card--phase2 .di-s8-card__icon { color: var(--text-secondary); }
+.di-s8-card__title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  flex-wrap: wrap;
+}
+.di-s8-card__title {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 15px;
+  color: var(--text-primary);
+}
+.di-s8-card__badge {
+  font-size: 9px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  background: rgba(255, 182, 39, 0.15);
+  color: #FFD27A;
+  border: 1px solid rgba(255, 182, 39, 0.3);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-weight: 700;
+}
+.di-s8-card__desc {
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  flex: 1;
+}
+.di-s8-card__btn {
+  align-self: flex-start;
+  margin-top: 4px;
+}
+
+.di-s8-error {
+  background: rgba(255, 107, 107, 0.08);
+  border: 1px solid rgba(255, 107, 107, 0.4);
+  color: #FF8B8B;
+  padding: 10px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  margin-top: 6px;
+}
+
+/* ── Confirm modal (reuses .di-modal* primitives from map.css) ───────── */
+.di-s8-confirm-msg {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.55;
+}
+
+/* ── Empty redirect state ─────────────────────────────────────────────── */
+.di-s8-empty {
+  margin: 80px auto;
+  max-width: 520px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  text-align: center;
+}
