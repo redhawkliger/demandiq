@@ -24,7 +24,7 @@ MAX_TOKENS = 8000
 MAX_CHARS  = 60000
 
 # Reference examples settings
-EXAMPLES_FILE        = "training_data.jsonl"
+EXAMPLES_FILE        = Path(__file__).parent / "training_data.jsonl"
 NUM_EXAMPLES_PER_CALL = 8        # how many examples to pass per call
 MAX_EXAMPLE_CHARS     = 4000     # truncate each example to keep prompts small
 
