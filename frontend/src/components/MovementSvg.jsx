@@ -81,11 +81,11 @@ const MOVEMENT_SPECS = {
 
   LTR:  { vb: '0 0 44 32', arrows: [['L', 8], ['T', 22], ['R', 36]] },
 
-  UL:   { vb: '0 0 40 32', arrows: [['U', 12], ['L', 28]] },
-  UT:   { vb: '0 0 40 32', arrows: [['U', 12], ['T', 28]] },
+  UL:   { vb: '0 0 52 32', arrows: [['U', 14], ['L', 38]] },
+  UT:   { vb: '0 0 52 32', arrows: [['U', 14], ['T', 38]] },
 
-  ULT:  { vb: '0 0 44 36', arrows: [['U', 8], ['L', 22], ['T', 36]] },
-  ULTR: { vb: '0 0 56 36', arrows: [['U', 8], ['L', 22], ['T', 36], ['R', 50]] },
+  ULT:  { vb: '0 0 64 36', arrows: [['U', 10], ['L', 28], ['T', 46]] },
+  ULTR: { vb: '0 0 80 36', arrows: [['U', 10], ['L', 28], ['T', 46], ['R', 64]] },
 }
 
 export const MOVEMENT_CODES = Object.keys(MOVEMENT_SPECS)
