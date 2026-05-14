@@ -1,0 +1,167 @@
+/* Shared form primitives. Used by S1 today; will be reused by S3, S4, S5. */
+
+.di-page {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 16px 0 64px;
+}
+
+.di-eyebrow {
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  font-weight: 500;
+}
+
+.di-h1 {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 28px;
+  letter-spacing: -0.01em;
+  color: var(--text-primary);
+  margin: 8px 0 6px;
+}
+
+.di-subtitle {
+  font-size: 14px;
+  color: var(--text-secondary);
+  margin: 0 0 24px;
+}
+
+.di-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.di-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.di-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.di-label {
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.di-required {
+  color: var(--accent);
+  margin-left: 4px;
+}
+
+.di-input {
+  width: 100%;
+  height: 44px;
+  padding: 0 14px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  transition: border-color 120ms, box-shadow 120ms;
+}
+
+.di-input::placeholder {
+  color: var(--text-tertiary);
+}
+
+.di-input:hover {
+  border-color: var(--border-strong);
+}
+
+.di-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-glow);
+}
+
+/* Native date picker icon — light it up in dark mode. */
+.di-input[type='date']::-webkit-calendar-picker-indicator {
+  filter: invert(0.7);
+  cursor: pointer;
+  opacity: 0.7;
+}
+
+.di-input[type='date']::-webkit-calendar-picker-indicator:hover {
+  opacity: 1;
+}
+
+/* ── Pills ───────────────────────────────────────────────────────────────── */
+.di-pill-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.di-pill {
+  height: 36px;
+  padding: 0 16px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 120ms, border-color 120ms, color 120ms;
+}
+
+.di-pill:hover:not(.di-pill--selected) {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  border-color: var(--border-strong);
+}
+
+.di-pill--selected {
+  background: var(--accent);
+  color: #ffffff;
+  border-color: var(--accent);
+}
+
+/* ── Primary button ──────────────────────────────────────────────────────── */
+.di-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 16px;
+}
+
+.di-btn-primary {
+  height: 44px;
+  padding: 0 24px;
+  border-radius: 8px;
+  border: none;
+  background: var(--accent);
+  color: #ffffff;
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 14px;
+  cursor: pointer;
+  transition: opacity 120ms, transform 80ms;
+}
+
+.di-btn-primary:hover:not(:disabled) {
+  opacity: 0.92;
+}
+
+.di-btn-primary:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.di-btn-primary:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
