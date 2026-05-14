@@ -243,6 +243,48 @@ export function ensureBalancingDefaults() {
   _emit()
 }
 
+// ── S6 analysis run + balanced volumes ────────────────────────────────────────
+export function setBalancedVolumes(intersectionId, period, balanced) {
+  const list = getIntersections().map((it) =>
+    it.id === intersectionId
+      ? { ...it, balanced: { ...(it.balanced ?? {}), [period]: balanced } }
+      : it
+  )
+  setIntersections(list)
+}
+
+// Bulk: write one /balance response's `balanced.{AM,PM}` into every matching
+// intersection by num. One write, one emit.
+export function applyBalancedRun(balancedByPeriod) {
+  const list = getIntersections().map((it) => {
+    const merged = { ...(it.balanced ?? {}) }
+    let touched = false
+    for (const period of ['AM', 'PM']) {
+      const periodData = balancedByPeriod?.[period]
+      if (!periodData) continue
+      const periodBalanced = periodData[String(it.num)]
+      if (periodBalanced) {
+        merged[period] = periodBalanced
+        touched = true
+      }
+    }
+    return touched ? { ...it, balanced: merged } : it
+  })
+  setIntersections(list)
+}
+
+export function setLastRun(runResult) {
+  if (!_initialized) _initSnapshot()
+  const analysis = { ...(_snapshot.analysis ?? {}), lastRun: runResult }
+  _snapshot = { ..._snapshot, analysis }
+  _persist()
+  _emit()
+}
+
+export function getLastRun() {
+  return getSnapshot().analysis?.lastRun ?? null
+}
+
 // ── Original API (preserved) ──────────────────────────────────────────────────
 export function loadProject() {
   const snap = getSnapshot()
