@@ -28,6 +28,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Font, Alignment, PatternFill
 
 from count_agent import extract, MOVEMENTS
+from balancer import balance_corridor, run_qc
 
 # ── Config ────────────────────────────────────────────────────────────────────
 API_KEY = os.getenv("ANTHROPIC_API_KEY")
@@ -182,6 +183,114 @@ async def excel_endpoint(payload: dict):
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": 'attachment; filename="demandiq_results.xlsx"'},
     )
+
+
+@app.post("/balance", dependencies=[Depends(require_auth)])
+async def balance_endpoint(payload: dict):
+    """Run Furness balancing for both AM and PM, plus QC checks.
+
+    Wraps backend/balancer.balance_corridor + run_qc in the response shape
+    the S6 frontend expects. Validates JSON shape but does not deeply
+    validate movement values (frontend constrains via number inputs).
+    """
+    # ── Parse / validate ─────────────────────────────────────────────────────
+    intersections = payload.get("intersections")
+    if not isinstance(intersections, list) or not intersections:
+        raise HTTPException(status_code=400, detail="intersections must be a non-empty list")
+    for it in intersections:
+        if not isinstance(it, dict) or "num" not in it:
+            raise HTTPException(status_code=400, detail="each intersection needs a num field")
+
+    unbalanced = payload.get("unbalanced_volumes", {})
+    if not isinstance(unbalanced, dict):
+        raise HTTPException(status_code=400, detail="unbalanced_volumes must be a dict")
+
+    corridor_dir = payload.get("corridor_dir", "EB/WB")
+    if corridor_dir not in ("EB/WB", "NB/SB"):
+        raise HTTPException(status_code=400, detail="corridor_dir must be 'EB/WB' or 'NB/SB'")
+
+    try:
+        convergence = float(payload.get("convergence_threshold", 0.01))
+        max_iter = int(payload.get("max_iterations", 200))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="convergence_threshold/max_iterations must be numeric")
+
+    if not (0 < convergence <= 1):
+        raise HTTPException(status_code=400, detail="convergence_threshold must be in (0, 1]")
+    if not (1 <= max_iter <= 10000):
+        raise HTTPException(status_code=400, detail="max_iterations must be in [1, 10000]")
+
+    # Convert balance_config keys "1-2" → both (1,2) and (2,1) so the reverse
+    # link can find its config without forcing the frontend to send both.
+    raw_bc = payload.get("balance_config") or {}
+    balance_config = {}
+    for k, v in raw_bc.items():
+        try:
+            up_str, dn_str = str(k).split("-")
+            up, dn = int(up_str), int(dn_str)
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"invalid balance_config key: {k}")
+        balance_config[(up, dn)] = v
+        balance_config[(dn, up)] = v
+
+    # Cast volume + extracted_meta keys from str → int
+    def _cast_vols(period_vols):
+        return {int(n): mv for n, mv in (period_vols or {}).items()}
+
+    am_unbal = _cast_vols(unbalanced.get("AM", {}))
+    pm_unbal = _cast_vols(unbalanced.get("PM", {}))
+
+    extracted_meta_raw = payload.get("extracted_meta") or {}
+    extracted_meta = {int(n): meta for n, meta in extracted_meta_raw.items()}
+
+    # ── Balance ──────────────────────────────────────────────────────────────
+    am_balanced, am_log, am_adj = balance_corridor(
+        intersections, am_unbal, corridor_dir, "AM",
+        balance_config=balance_config,
+        max_iterations=max_iter,
+        convergence_threshold=convergence,
+    )
+    pm_balanced, pm_log, pm_adj = balance_corridor(
+        intersections, pm_unbal, corridor_dir, "PM",
+        balance_config=balance_config,
+        max_iterations=max_iter,
+        convergence_threshold=convergence,
+    )
+
+    def _conv_summary(log):
+        last_gap = log[-1]["max_relative_gap"] if log else 0.0
+        return {
+            "iterations_used": len(log),
+            "converged": last_gap <= convergence,
+            "final_gap": last_gap,
+            "log": log,
+        }
+
+    # ── QC ───────────────────────────────────────────────────────────────────
+    qc_flags = run_qc(
+        intersections,
+        {"AM": am_unbal, "PM": pm_unbal},
+        extracted_meta,
+        {"AM": am_balanced, "PM": pm_balanced},
+        corridor_dir,
+    )
+
+    # ── Response — string keys so JSON round-trips cleanly ───────────────────
+    return {
+        "balanced": {
+            "AM": {str(n): vols for n, vols in am_balanced.items()},
+            "PM": {str(n): vols for n, vols in pm_balanced.items()},
+        },
+        "convergence": {
+            "AM": _conv_summary(am_log),
+            "PM": _conv_summary(pm_log),
+        },
+        "adjustments": {
+            "AM": am_adj,
+            "PM": pm_adj,
+        },
+        "qc_flags": qc_flags,
+    }
 
 
 @app.get("/health")
