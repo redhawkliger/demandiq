@@ -82,6 +82,32 @@ export function setCorridorDir(dir) {
   _emit()
 }
 
+// ── S3 approach configuration ─────────────────────────────────────────────────
+export function getApproaches(intersectionId) {
+  const it = getIntersections().find((x) => x.id === intersectionId)
+  return it?.approaches ?? null
+}
+
+export function setApproaches(intersectionId, approaches) {
+  const list = getIntersections().map((it) =>
+    it.id === intersectionId ? { ...it, approaches } : it
+  )
+  setIntersections(list)
+}
+
+// True iff every existing approach (exists !== false) has at least one lane.
+export function isIntersectionConfigured(intersectionId) {
+  const a = getApproaches(intersectionId)
+  if (!a) return false
+  for (const dir of ['EB', 'WB', 'NB', 'SB']) {
+    const ap = a[dir]
+    if (ap && ap.exists !== false) {
+      if (!Array.isArray(ap.lanes) || ap.lanes.length < 1) return false
+    }
+  }
+  return true
+}
+
 // ── Original API (preserved) ──────────────────────────────────────────────────
 export function loadProject() {
   const snap = getSnapshot()
