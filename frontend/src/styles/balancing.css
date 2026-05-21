@@ -181,7 +181,7 @@
 }
 .di-s5-time input::-webkit-calendar-picker-indicator {
   filter: invert(0.7);
-  opacity: 0.6;
+  opacity: 0.85;
   cursor: pointer;
 }
 .di-s5-time input:disabled { opacity: 0.4; cursor: not-allowed; }
@@ -430,7 +430,7 @@
   letter-spacing: 0.02em;
 }
 .di-s5-sum--off {
-  opacity: 0.55;
+  opacity: 0.85;
   font-size: 12px;
   color: var(--text-tertiary);
   text-align: center;
