@@ -1,5 +1,6 @@
-import { useEffect, useState, useSyncExternalStore } from 'react'
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { Upload } from 'lucide-react'
 
 import {
   subscribe,
@@ -21,6 +22,7 @@ const newId = () =>
     : `f-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 
 const STANDARD_DIRS = new Set(['EB/WB', 'NB/SB'])
+const PERIODS = ['AM', 'PM']
 
 function hasAnyApproaches(intersections) {
   return intersections.some((it) => it.approaches)
@@ -28,12 +30,20 @@ function hasAnyApproaches(intersections) {
 
 function hasAnyVolumes(intersections) {
   for (const it of intersections) {
-    for (const period of ['AM', 'PM']) {
+    for (const period of PERIODS) {
       const v = it.volumes?.[period]
       if (v && Object.keys(v).length > 0) return true
     }
   }
   return false
+}
+
+// Returns the list of empty periods for one intersection, e.g. ['AM'] or ['AM','PM'].
+function missingPeriods(it) {
+  return PERIODS.filter((p) => {
+    const v = it.volumes?.[p]
+    return !v || Object.keys(v).length === 0
+  })
 }
 
 export default function S4_VolumeEntry() {
@@ -57,8 +67,13 @@ export default function S4_VolumeEntry() {
   const [files, setFiles] = useState([])
   const [extracting, setExtracting] = useState(false)
   const [extractError, setExtractError] = useState(null)
-  const [unmatched, setUnmatched] = useState([])
-  // unmatched = [{ name, volumes, phf, hv_pct, am_peak_start, pm_peak_start, sourceFile, vendorDetected }]
+
+  // Unified extraction-buffer state. Each entry:
+  //   { id, payload, appliedTo: projectId|null, autoMatchFailed: bool, dismissed: bool }
+  // payload = { name, volumes, phf, hv_pct, sourceFile, vendorDetected, ... }
+  const [extracted, setExtracted] = useState([])
+
+  const uploadRegionRef = useRef(null)
 
   const addFiles = (fileList) => {
     const next = Array.from(fileList).map((f) => ({
@@ -117,12 +132,30 @@ export default function S4_VolumeEntry() {
 
       // Match against the latest project intersections (avoid stale state)
       const projectInts = getIntersections()
-      const { matches, unmatched: unm } = matchAgentToProject(agentInts, projectInts)
+      const { matches } = matchAgentToProject(agentInts, projectInts)
 
+      // matches: { [projectId]: agentIdx } — build the inverse for O(1) lookup
+      const projectIdByAgentIdx = new Map(
+        Object.entries(matches).map(([pid, idx]) => [idx, pid])
+      )
+
+      // Apply auto-matches to the store
       for (const [projectId, agentIdx] of Object.entries(matches)) {
         applyExtractedVolumes(projectId, agentInts[agentIdx])
       }
-      setUnmatched((prev) => [...prev, ...unm])
+
+      // Add every extracted block to the buffer, stamped with auto-match result
+      const newExtracted = agentInts.map((ag, idx) => {
+        const matchedPid = projectIdByAgentIdx.get(idx) ?? null
+        return {
+          id: newId(),
+          payload: ag,
+          appliedTo: matchedPid,
+          autoMatchFailed: matchedPid == null,
+          dismissed: false,
+        }
+      })
+      setExtracted((prev) => [...prev, ...newExtracted])
     } catch (err) {
       setExtractError(
         `Extraction failed: ${err.message}. Make sure the backend is running at localhost:8000 (cd backend && python3.12 app.py).`
@@ -137,12 +170,24 @@ export default function S4_VolumeEntry() {
     }
   }
 
-  const applyUnmatched = (idx, projectId) => {
+  // Apply a buffered extraction to a chosen project intersection.
+  const applyBufferedExtraction = (extractedId, projectId) => {
     if (!projectId) return
-    applyExtractedVolumes(projectId, unmatched[idx])
-    setUnmatched((prev) => prev.filter((_, i) => i !== idx))
+    const e = extracted.find((x) => x.id === extractedId)
+    if (!e) return
+    applyExtractedVolumes(projectId, e.payload)
+    setExtracted((prev) =>
+      prev.map((x) => (x.id === extractedId ? { ...x, appliedTo: projectId } : x))
+    )
   }
-  const dismissUnmatched = (idx) => setUnmatched((prev) => prev.filter((_, i) => i !== idx))
+  const dismissExtraction = (extractedId) =>
+    setExtracted((prev) =>
+      prev.map((x) => (x.id === extractedId ? { ...x, dismissed: true } : x))
+    )
+
+  const scrollToUpload = () => {
+    uploadRegionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
 
   if (needsConfig) {
     return (
@@ -157,9 +202,25 @@ export default function S4_VolumeEntry() {
 
   const canContinue = hasAnyVolumes(intersections)
 
+  // ── Derived panels ────────────────────────────────────────────────────
+  // Agent-side orphans (kept for backward compat with original UX).
+  const orphanExtractions = extracted.filter(
+    (e) => e.autoMatchFailed && !e.appliedTo && !e.dismissed
+  )
+
+  // Project-side gaps — per-period.
+  const gaps = intersections
+    .map((it) => ({ it, missing: missingPeriods(it) }))
+    .filter(({ missing }) => missing.length > 0)
+
+  // Extractions available for manual assignment (not yet applied, not dismissed).
+  const availableExtractions = extracted.filter(
+    (e) => !e.appliedTo && !e.dismissed
+  )
+
   return (
     <div className="di-s4">
-      <div className="di-s4__upload-region">
+      <div className="di-s4__upload-region" ref={uploadRegionRef}>
         <UploadBar
           files={files}
           extracting={extracting}
@@ -181,23 +242,47 @@ export default function S4_VolumeEntry() {
       <div className="di-s4__grid-region">
         <VolumeGrid intersections={intersections} />
 
-        {unmatched.length > 0 && (
+        {gaps.length > 0 && (
+          <div className="di-vol-needs">
+            <div className="di-vol-needs__title">
+              Needs volumes ({gaps.length})
+            </div>
+            <div className="di-vol-needs__sub">
+              These project intersections have at least one empty period. Pick an
+              extracted file to assign, or upload a new one.
+            </div>
+            <div className="di-vol-needs__list">
+              {gaps.map(({ it, missing }) => (
+                <NeedsVolumeRow
+                  key={it.id}
+                  intersection={it}
+                  missing={missing}
+                  available={availableExtractions}
+                  onAssign={(extractedId) => applyBufferedExtraction(extractedId, it.id)}
+                  onUpload={scrollToUpload}
+                />
+              ))}
+            </div>
+          </div>
+        )}
+
+        {orphanExtractions.length > 0 && (
           <div className="di-vol-unmatched">
             <div className="di-vol-unmatched__title">
-              Unmatched extractions ({unmatched.length})
+              Unmatched extractions ({orphanExtractions.length})
             </div>
             <div className="di-vol-unmatched__sub">
               The agent extracted these intersections but couldn't auto-match them
               to a project intersection. Pick the correct one for each, or dismiss.
             </div>
             <div className="di-vol-unmatched__list">
-              {unmatched.map((u, idx) => (
+              {orphanExtractions.map((e) => (
                 <UnmatchedRow
-                  key={`${u.sourceFile}-${u.name}-${idx}`}
-                  agent={u}
+                  key={e.id}
+                  agent={e.payload}
                   intersections={intersections}
-                  onApply={(pid) => applyUnmatched(idx, pid)}
-                  onDismiss={() => dismissUnmatched(idx)}
+                  onApply={(pid) => applyBufferedExtraction(e.id, pid)}
+                  onDismiss={() => dismissExtraction(e.id)}
                 />
               ))}
             </div>
@@ -220,6 +305,59 @@ export default function S4_VolumeEntry() {
           Continue to balancing →
         </button>
       </footer>
+    </div>
+  )
+}
+
+// ── Needs-volume row: project-side gap with optional dropdown ──────────
+function NeedsVolumeRow({ intersection, missing, available, onAssign, onUpload }) {
+  const [pick, setPick] = useState('')
+  const missingLabel = missing.join(' + ')
+  const hasOptions = available.length > 0
+
+  return (
+    <div className="di-vol-needs__row">
+      <div className="di-vol-needs__col-name">
+        <div className="di-vol-needs__name">
+          {String(intersection.num).padStart(2, '0')} — {intersection.name}
+        </div>
+        <div className="di-vol-needs__missing">missing {missingLabel}</div>
+      </div>
+      {hasOptions ? (
+        <>
+          <select
+            className="di-vol-unm__select"
+            value={pick}
+            onChange={(e) => setPick(e.target.value)}
+          >
+            <option value="">Assign extracted file…</option>
+            {available.map((e) => (
+              <option key={e.id} value={e.id}>
+                {e.payload.name || '(no name)'} — {e.payload.sourceFile || 'unknown source'}
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            className="di-vol-unm__apply"
+            disabled={!pick}
+            onClick={() => { if (pick) onAssign(pick) }}
+          >
+            Apply
+          </button>
+        </>
+      ) : (
+        <>
+          <div className="di-vol-needs__empty">No extracted files available</div>
+          <button
+            type="button"
+            className="di-vol-needs__upload"
+            onClick={onUpload}
+          >
+            <Upload size={12} /> Upload
+          </button>
+        </>
+      )}
     </div>
   )
 }
