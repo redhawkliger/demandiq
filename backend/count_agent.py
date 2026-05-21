@@ -20,8 +20,9 @@ except ImportError:
     sys.exit("Run: pip install anthropic openpyxl pdfplumber xlrd --break-system-packages")
 
 MODEL      = "claude-sonnet-4-5"
-MAX_TOKENS = 8000
-MAX_CHARS  = 60000
+MAX_TOKENS = 16000
+MAX_CHARS  = 200000
+MAX_PDF_PAGES = 40
 
 # Reference examples settings
 EXAMPLES_FILE        = Path(__file__).parent / "training_data.jsonl"
@@ -126,26 +127,33 @@ def format_examples_for_prompt(examples):
 # ── FILE READING ──────────────────────────────────────────────────────────────
 def read_file(filepath):
     """
-    Returns either:
-      (text_content, 'excel'|'csv'|'text')   — Claude reads as text
-      (pdf_image_bytes_list, 'pdf_images')   — Claude reads as images (better for PDFs)
+    Returns a 3-tuple: (content, ftype, warnings)
+      content  — text str (for excel/csv/text/pdf-fallback) or list[base64] (pdf_images)
+      ftype    — 'excel' | 'csv' | 'text' | 'pdf' | 'pdf_images'
+      warnings — list[str]; non-empty when content was truncated by a cap so the
+                 caller can surface "data was dropped" to the user. NEVER silently
+                 drop content without populating this.
     """
     ext = Path(filepath).suffix.lower()
     if ext in ('.xlsx', '.xls'):
-        return _read_excel(filepath), 'excel'
+        content, warnings = _read_excel(filepath)
+        return content, 'excel', warnings
     if ext == '.pdf':
         # Try image-based extraction first (much better for tables)
         try:
-            images = _pdf_to_images(filepath)
+            images, warnings = _pdf_to_images(filepath)
             if images:
-                return images, 'pdf_images'
+                return images, 'pdf_images', warnings
         except Exception as e:
             print(f"  (PDF image conversion failed: {e}, falling back to text)")
         # Fallback: text extraction
-        return _read_pdf_text(filepath), 'pdf'
+        content, warnings = _read_pdf_text(filepath)
+        return content, 'pdf', warnings
     if ext == '.csv':
-        return _read_text(filepath), 'csv'
-    return _read_text(filepath), 'text'
+        content, warnings = _read_text(filepath)
+        return content, 'csv', warnings
+    content, warnings = _read_text(filepath)
+    return content, 'text', warnings
 
 def _read_excel(filepath):
     import openpyxl
@@ -155,7 +163,7 @@ def _read_excel(filepath):
         try:
             return _read_xls_legacy(filepath)
         except Exception as e:
-            return f"ERROR reading Excel: {e}"
+            return f"ERROR reading Excel: {e}", []
 
     SKIP = ['bank', 'unshifted', 'stats', 'cover', 'blank']
     content = []
@@ -176,7 +184,16 @@ def _read_excel(filepath):
         content.append(f"\n=== SHEET: {sheet_name} ===")
         for row in rows:
             content.append("\t".join(str(v) if v is not None else "" for v in row))
-    return "\n".join(content)[:MAX_CHARS]
+    full = "\n".join(content)
+    warnings = []
+    if len(full) > MAX_CHARS:
+        warnings.append(
+            f"Excel content is {len(full):,} chars but extraction cap is {MAX_CHARS:,}. "
+            f"Content past the cap was NOT sent to the agent — any intersections "
+            f"in the trailing portion of the workbook were NOT extracted."
+        )
+        full = full[:MAX_CHARS]
+    return full, warnings
 
 def _read_xls_legacy(filepath):
     import xlrd
@@ -187,12 +204,39 @@ def _read_xls_legacy(filepath):
         for r in range(min(sheet.nrows, 500)):
             row = sheet.row_values(r)
             content.append("\t".join(str(v) for v in row))
-    return "\n".join(content)[:MAX_CHARS]
+    full = "\n".join(content)
+    warnings = []
+    if len(full) > MAX_CHARS:
+        warnings.append(
+            f"Legacy .xls content is {len(full):,} chars but cap is {MAX_CHARS:,}. "
+            f"Content past the cap was NOT sent to the agent."
+        )
+        full = full[:MAX_CHARS]
+    return full, warnings
 
-def _pdf_to_images(filepath, max_pages=12, dpi=150):
-    """Convert PDF pages to base64-encoded PNG images for Claude vision."""
+def _pdf_to_images(filepath, max_pages=MAX_PDF_PAGES, dpi=150):
+    """Convert PDF pages to base64-encoded PNG images for Claude vision.
+    Returns (list[base64_png], list[warning_str]). Pre-counts pages so we can
+    warn loudly when a PDF exceeds the cap rather than silently dropping the
+    tail — that was the bug that caused later intersections to disappear.
+    """
     import base64, io
-    from pdf2image import convert_from_path
+    from pdf2image import convert_from_path, pdfinfo_from_path
+
+    warnings = []
+    try:
+        info = pdfinfo_from_path(str(filepath))
+        total_pages = int(info.get("Pages", 0))
+    except Exception:
+        total_pages = 0  # treat as unknown; cap still applies via last_page
+
+    if total_pages and total_pages > max_pages:
+        warnings.append(
+            f"PDF has {total_pages} pages but extraction cap is {max_pages}. "
+            f"Only the first {max_pages} pages were sent to the agent — "
+            f"any intersections appearing on pages {max_pages + 1}-{total_pages} "
+            f"were NOT extracted. Raise MAX_PDF_PAGES or split the file."
+        )
 
     images = convert_from_path(str(filepath), dpi=dpi, last_page=max_pages)
     encoded = []
@@ -207,27 +251,78 @@ def _pdf_to_images(filepath, max_pages=12, dpi=150):
         buf = io.BytesIO()
         img.save(buf, format='PNG', optimize=True)
         encoded.append(base64.standard_b64encode(buf.getvalue()).decode('utf-8'))
-    return encoded
+    return encoded, warnings
 
 def _read_pdf_text(filepath):
-    """Fallback: extract text from PDF (less accurate for tables)."""
+    """Fallback: extract text from PDF (less accurate for tables).
+    Returns (text, list[warning_str]).
+    """
     import pdfplumber
+    warnings = []
     content = []
     with pdfplumber.open(filepath) as pdf:
-        for i, page in enumerate(pdf.pages[:12]):
+        total_pages = len(pdf.pages)
+        if total_pages > MAX_PDF_PAGES:
+            warnings.append(
+                f"PDF has {total_pages} pages but extraction cap is {MAX_PDF_PAGES} "
+                f"(text-fallback path). Only the first {MAX_PDF_PAGES} pages were sent "
+                f"to the agent — any intersections on pages "
+                f"{MAX_PDF_PAGES + 1}-{total_pages} were NOT extracted."
+            )
+        for i, page in enumerate(pdf.pages[:MAX_PDF_PAGES]):
             content.append(f"\n=== PAGE {i+1} ===")
             text = page.extract_text(layout=True) or page.extract_text() or ""
             content.append(text)
-    return "\n".join(content)[:MAX_CHARS]
+    full = "\n".join(content)
+    if len(full) > MAX_CHARS:
+        warnings.append(
+            f"PDF text is {len(full):,} chars but char cap is {MAX_CHARS:,}. "
+            f"Content past the cap was NOT sent to the agent."
+        )
+        full = full[:MAX_CHARS]
+    return full, warnings
 
 def _read_text(filepath):
+    """Returns (text, list[warning_str])."""
     with open(filepath, encoding='utf-8', errors='replace') as f:
-        return f.read()[:MAX_CHARS]
+        full = f.read()
+    warnings = []
+    if len(full) > MAX_CHARS:
+        warnings.append(
+            f"Text/CSV content is {len(full):,} chars but cap is {MAX_CHARS:,}. "
+            f"Content past the cap was NOT sent to the agent."
+        )
+        full = full[:MAX_CHARS]
+    return full, warnings
 
 # ── EXTRACTION PROMPT ─────────────────────────────────────────────────────────
 SYSTEM_PROMPT = """You are a senior traffic engineer with deep expertise reading turning movement count files from ANY vendor across the US and Canada.
 
 Read this count file and extract peak hour vehicle data. Use engineering judgment to figure out the file's structure — every vendor formats files differently. Reason from first principles.
+
+=== CRITICAL — MULTI-INTERSECTION FILES ===
+
+This file may contain MULTIPLE intersections. You MUST extract EVERY intersection
+present in the file — do not stop after the first few. Scan the entire document
+from start to end (including the last pages / last sheets / last rows).
+
+Workflow:
+  1. First, count how many distinct intersections are in the file. State the count
+     in `format_summary` (e.g. "9 intersections, one per 4-page block").
+  2. Then extract each one into the `intersections` array, in the order they
+     appear in the file.
+  3. If you counted N intersections, the array MUST contain N blocks. Returning
+     fewer than N is a CRITICAL ERROR — re-scan and add the missing ones.
+
+Common patterns to watch for:
+  - One intersection per page (PDF) — every page typically has its own
+  - One intersection per Excel sheet — check every sheet tab
+  - Multiple intersections stacked in one sheet — look for repeating headers
+  - A summary or cover page may list every intersection — use it as a checklist
+
+Never skip an intersection because its data looks incomplete. Extract what's
+there and note the gap in `notes`. Omitting an intersection entirely is worse
+than extracting it with some null fields.
 
 === WHAT TO EXTRACT PER INTERSECTION, PER PERIOD (AM and PM) ===
 
@@ -258,12 +353,17 @@ HV% (Heavy Vehicle %) — definition:
   HV / Total × 100. Round to 1 decimal.
 
 === OUTPUT — VALID JSON ONLY, NO MARKDOWN ===
+
+The `intersections` array MUST contain one block per intersection in the file.
+The example below shows TWO blocks to make this explicit — if the file has 9
+intersections, return 9 blocks; if it has 1, return 1.
+
 {
   "vendor_detected": "NDS|Quality Counts|Counts Unlimited|GRAM|Pape-Dawson|Unknown",
-  "format_summary": "1-2 sentences describing layout",
+  "format_summary": "e.g. '9 intersections, one per 4-page block, NDS layout'",
   "intersections": [
     {
-      "name": "intersection name from file",
+      "name": "Main St & 1st Ave",
       "am_peak_start": "07:45",
       "pm_peak_start": "15:45",
       "volumes": {
@@ -274,13 +374,24 @@ HV% (Heavy Vehicle %) — definition:
       "hv_pct": {"AM": 2.6, "PM": 1.9},
       "hv_method": "how HV was computed",
       "notes": "any observations or ambiguities"
+    },
+    {
+      "name": "Main St & 2nd Ave",
+      "am_peak_start": "07:30",
+      "pm_peak_start": "16:30",
+      "volumes": { "AM": { "...": "..." }, "PM": { "...": "..." } },
+      "phf": {"AM": 0.92, "PM": 0.95},
+      "hv_pct": {"AM": 3.1, "PM": 2.4},
+      "hv_method": "...",
+      "notes": "..."
     }
+    /* ...continue with one block per intersection found in the file... */
   ]
 }"""
 
 # ── CLAUDE CALL ───────────────────────────────────────────────────────────────
 def extract(filepath, api_key):
-    content, ftype = read_file(filepath)
+    content, ftype, file_warnings = read_file(filepath)
 
     # Handle errors from text readers
     if isinstance(content, str) and content.startswith("ERROR"):
@@ -319,6 +430,16 @@ def extract(filepath, api_key):
         messages=[{"role": "user", "content": user_content}]
     )
 
+    # Refuse to return partial JSON silently. If we hit max_tokens, the response
+    # is truncated and json.loads might succeed on a partial array (worse than
+    # failing — looks like a complete answer with intersections missing).
+    if msg.stop_reason == "max_tokens":
+        raise ValueError(
+            f"Extraction response was truncated at max_tokens ({MAX_TOKENS}). "
+            f"File is too large for one pass — raise MAX_TOKENS or split the file. "
+            f"Usage: input={msg.usage.input_tokens}, output={msg.usage.output_tokens}."
+        )
+
     text = msg.content[0].text.strip()
     if text.startswith("```"):
         parts = text.split("```")
@@ -338,4 +459,6 @@ def extract(filepath, api_key):
     result["source_file"] = Path(filepath).name
     result["file_type"] = ftype
     result["_examples_used"] = len(examples)
+    if file_warnings:
+        result["warnings"] = file_warnings
     return result
