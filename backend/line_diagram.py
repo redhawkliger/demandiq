@@ -83,6 +83,7 @@ def _single_cell_preset(fig_inches=4.0):
         'fs_name':   max(6,  round(b['fs_name']   * sf, 1)),
         'fs_num':    max(6,  round(b['fs_num']    * sf, 1)),
         'sf':        sf,
+        'fig_inches': fig_inches,
     }
 
 
@@ -271,6 +272,67 @@ def _dg_draw_approach(ax, ap, cx, cy, u_vols, b_vols, p, label_fn):
                     ha='left', va='center', zorder=10)
 
 
+def _fit_street_label(text, base_fs, fig_inches, max_text_extent, min_fs=6.0):
+    """Wrap a street-name label so it fits along an arm without colliding with
+    the title / badge / cell edge.
+
+    Strategy:
+      1. Split on ' / ' (combined route names like "South H St / Cabarillo Hwy"
+         become two lines).
+      2. Any line still longer than soft_limit chars gets split once more at the
+         space nearest its midpoint.
+      3. Font size shrinks proportionally so the longest line fits within
+         max_text_extent (axis-fraction units), floored at min_fs pt.
+
+    Returns (rendered_text, fs). The text may contain '\\n'; matplotlib renders
+    it as multi-line natively. fs is unchanged when the label already fits.
+    """
+    if not text:
+        return text, base_fs
+
+    # Step 1 — wrap on ' / '
+    if ' / ' in text:
+        lines = [s.strip() for s in text.split(' / ') if s.strip()]
+    else:
+        lines = [text]
+
+    # Step 2 — secondary wrap on midpoint space for any still-long line
+    soft_limit = 18
+    wrapped = []
+    for line in lines:
+        if len(line) <= soft_limit or ' ' not in line:
+            wrapped.append(line)
+            continue
+        mid = len(line) // 2
+        left = line.rfind(' ', 0, mid)
+        right = line.find(' ', mid)
+        if left < 0 and right < 0:
+            wrapped.append(line)
+            continue
+        if left < 0:
+            sp = right
+        elif right < 0:
+            sp = left
+        else:
+            sp = left if (mid - left) <= (right - mid) else right
+        wrapped.append(line[:sp].strip())
+        wrapped.append(line[sp + 1:].strip())
+
+    longest = max((len(L) for L in wrapped), default=0)
+    if longest == 0:
+        return '\n'.join(wrapped), base_fs
+
+    # Step 3 — proportional shrink. Empirical char-width coefficient for the
+    # bold sans-serif fallback matplotlib uses: ≈ 0.55 × glyph height.
+    # Glyph height in axis-fraction units = fs / (72 * fig_inches).
+    char_w_per_pt = 0.55 / (72.0 * fig_inches)
+    fs = base_fs
+    if longest * fs * char_w_per_pt > max_text_extent:
+        fs = max_text_extent / (longest * char_w_per_pt)
+    fs = max(min_fs, min(fs, base_fs))
+    return '\n'.join(wrapped), round(fs, 1)
+
+
 def _dg_draw_cell(ax, geo, u_vols, b_vols, p, label_fn):
     """Draw one full intersection cell into `ax` using preset p."""
     active  = geo.get('active_legs', ['NB', 'SB', 'EB', 'WB'])
@@ -309,16 +371,28 @@ def _dg_draw_cell(ax, geo, u_vols, b_vols, p, label_fn):
         for ap in geo.get('stopped_approaches', []):
             _dg_stop_sign(ax, ap, cx, cy)
 
-    ns = streets.get('NS', '')
-    ew = streets.get('EW', '')
-    nk = dict(fontsize=p['fs_street'], color=DG_BLACK, fontweight='bold',
-              ha='center', va='center', zorder=7)
-    if ns:
-        if 'NB' in active: ax.text(cx - 0.052, cy - arm * 0.70, ns, rotation=90, **nk)
-        if 'SB' in active: ax.text(cx + 0.052, cy + arm * 0.70, ns, rotation=90, **nk)
-    if ew:
-        if 'EB' in active: ax.text(cx - arm * 0.70, cy + 0.044, ew, **nk)
-        if 'WB' in active: ax.text(cx + arm * 0.70, cy - 0.044, ew, **nk)
+    # Street labels — wrap on ' / ' and auto-shrink long names so they stay
+    # clear of the title (y≈0.955), the number badge (top-left), and the cell
+    # border. NS labels are rotated 90°, so their "length" extends along the
+    # vertical arm — same overflow risk toward the title as EW does laterally.
+    fig_inches = p.get('fig_inches', 4.0)
+    ns_raw = streets.get('NS', '')
+    ew_raw = streets.get('EW', '')
+    # NS radial space: from label center (cy ± arm*0.70 = 0.766 / 0.234) to title
+    # (y=0.955) is 0.189 axis units half-extent; doubled = 0.378. Use 0.34 to
+    # leave a small safety margin from the title.
+    ns_text, ns_fs = _fit_street_label(ns_raw, p['fs_street'], fig_inches, 0.34)
+    # EW lateral space: from label center (cx ± arm*0.70) to the nearer cell edge
+    # is 0.234 axis units half-extent; doubled = 0.468. Use 0.44 for margin.
+    ew_text, ew_fs = _fit_street_label(ew_raw, p['fs_street'], fig_inches, 0.44)
+    nk_common = dict(color=DG_BLACK, fontweight='bold',
+                     ha='center', va='center', zorder=7)
+    if ns_text:
+        if 'NB' in active: ax.text(cx - 0.052, cy - arm * 0.70, ns_text, rotation=90, fontsize=ns_fs, **nk_common)
+        if 'SB' in active: ax.text(cx + 0.052, cy + arm * 0.70, ns_text, rotation=90, fontsize=ns_fs, **nk_common)
+    if ew_text:
+        if 'EB' in active: ax.text(cx - arm * 0.70, cy + 0.044, ew_text, fontsize=ew_fs, **nk_common)
+        if 'WB' in active: ax.text(cx + arm * 0.70, cy - 0.044, ew_text, fontsize=ew_fs, **nk_common)
 
     for ap in active:
         _dg_draw_approach(ax, ap, cx, cy, u_vols, b_vols, p, label_fn)
