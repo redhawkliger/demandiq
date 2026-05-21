@@ -25,6 +25,64 @@ function _initSnapshot() {
     _snapshot = {}
   }
   _initialized = true
+  // Old projects (pre-links model) get default consecutive links generated
+  // once, here at load time. Run-once: gated on links being empty/absent AND
+  // intersections ≥ 2 — so this never re-fires after init for the same load,
+  // and is skipped when the user already has links.
+  if (_migrateLinksIfNeeded()) _persist()
+}
+
+// Internal link-ID generator. Matches the intersection ID style (crypto.randomUUID
+// with a fallback) but prefixed `lnk_` so links are visually distinguishable
+// from intersections in DevTools / exported JSON.
+function _newLinkId() {
+  const u =
+    typeof crypto !== 'undefined' && crypto.randomUUID
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+  return `lnk_${u}`
+}
+
+// Migration: if a project has ≥2 intersections but no `links` array, generate
+// default consecutive links by num order to preserve the old "balance all
+// intersections in num-order along corridorDir" semantics. Returns true iff
+// _snapshot was mutated, so the caller can decide whether to _persist.
+//
+// IMPORTANT: called only from _initSnapshot (page load) and saveProject (import),
+// NOT from getSnapshot. Putting it on a hot read path would re-trigger on every
+// render and clobber any explicit user empty-state. The empty-links check is the
+// run-once guard: once links is populated, future loads skip this entirely.
+function _migrateLinksIfNeeded() {
+  const intersections = _snapshot.intersections ?? []
+  const existing = _snapshot.links ?? []
+  if (existing.length > 0) return false
+  if (intersections.length < 2) return false
+
+  // Sort by num so the corridor order is preserved regardless of insertion order
+  const sorted = [...intersections].sort((a, b) => (a.num ?? 0) - (b.num ?? 0))
+
+  // Direction: prefer balancing.corridorDir (already 'EB/WB' | 'NB/SB' form),
+  // fall back to analysis.corridorDir ('NS'/'EW' short form), fall back EB/WB.
+  const balDir = _snapshot.balancing?.corridorDir
+  const anlDir = _snapshot.analysis?.corridorDir
+  let direction = 'EB/WB'
+  if (balDir === 'NB/SB' || balDir === 'EB/WB') direction = balDir
+  else if (anlDir === 'NS') direction = 'NB/SB'
+  else if (anlDir === 'EW') direction = 'EB/WB'
+
+  const generated = []
+  for (let i = 0; i < sorted.length - 1; i++) {
+    generated.push({
+      id: _newLinkId(),
+      fromId: sorted[i].id,
+      toId: sorted[i + 1].id,
+      direction,
+      mode: 'Full',
+      landUseThreshold: null,
+    })
+  }
+  _snapshot = { ..._snapshot, links: generated }
+  return true
 }
 
 function _emit() {
@@ -84,6 +142,79 @@ export function reorderIntersections(orderedIds) {
   // Defensive: if the caller dropped or added IDs, fall back to a no-op.
   if (reordered.length !== current.length) return
   setIntersections(reordered)
+}
+
+// ── Links (corridor topology — Stage 1: data model only) ─────────────────────
+// A link is a directed-balancing edge between two intersections.
+// Shape:
+//   { id: 'lnk_<uuid>', fromId, toId, direction: 'EB/WB'|'NB/SB',
+//     mode: 'Full'|'Land Use'|'None', landUseThreshold: number|null }
+// fromId/toId reference intersection.id (stable across drag-reorder), NOT num.
+export function getLinks() {
+  return getSnapshot().links ?? []
+}
+
+// Append a new link. Dedupe: if a link already connects the same pair in
+// either direction (A→B or B→A), do not create a duplicate — return the
+// existing link's id. Reject self-links (fromId === toId). Returns the new
+// or existing link id, or null on invalid input.
+export function addLink({ fromId, toId, direction, mode = 'Full', landUseThreshold = null }) {
+  if (!_initialized) _initSnapshot()
+  if (!fromId || !toId || fromId === toId) return null
+  const cur = _snapshot.links ?? []
+  const existing = cur.find(
+    (l) => (l.fromId === fromId && l.toId === toId) ||
+           (l.fromId === toId && l.toId === fromId)
+  )
+  if (existing) return existing.id
+  const link = {
+    id: _newLinkId(),
+    fromId,
+    toId,
+    direction,
+    mode,
+    landUseThreshold,
+  }
+  _snapshot = { ..._snapshot, links: [...cur, link] }
+  _persist()
+  _emit()
+  return link.id
+}
+
+export function removeLink(linkId) {
+  if (!_initialized) _initSnapshot()
+  const cur = _snapshot.links ?? []
+  const next = cur.filter((l) => l.id !== linkId)
+  if (next.length === cur.length) return
+  _snapshot = { ..._snapshot, links: next }
+  _persist()
+  _emit()
+}
+
+// Shallow-merge update. Typically used to flip direction or change balancing
+// mode + threshold. id is immutable; passing id in `partial` is ignored
+// (preserved by spread ordering).
+export function updateLink(linkId, partial) {
+  if (!_initialized) _initSnapshot()
+  const cur = _snapshot.links ?? []
+  let changed = false
+  const next = cur.map((l) => {
+    if (l.id !== linkId) return l
+    changed = true
+    return { ...l, ...partial, id: l.id }
+  })
+  if (!changed) return
+  _snapshot = { ..._snapshot, links: next }
+  _persist()
+  _emit()
+}
+
+// Bulk replace — for migration paths and future agent-suggested topology.
+export function setLinks(linksArray) {
+  if (!_initialized) _initSnapshot()
+  _snapshot = { ..._snapshot, links: Array.isArray(linksArray) ? linksArray : [] }
+  _persist()
+  _emit()
 }
 
 export function getCorridorDir() {
@@ -323,6 +454,9 @@ export function loadProject() {
 export function saveProject(project) {
   _snapshot = project
   _initialized = true
+  // If an imported project pre-dates the links model, migrate before persisting
+  // so the on-disk shape stays consistent with what the store exposes.
+  _migrateLinksIfNeeded()
   _persist()
   _emit()
 }
