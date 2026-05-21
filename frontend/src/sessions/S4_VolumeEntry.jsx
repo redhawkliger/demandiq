@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Upload } from 'lucide-react'
+import { Upload, AlertTriangle, X } from 'lucide-react'
 
 import {
   subscribe,
@@ -73,6 +73,11 @@ export default function S4_VolumeEntry() {
   // payload = { name, volumes, phf, hv_pct, sourceFile, vendorDetected, ... }
   const [extracted, setExtracted] = useState([])
 
+  // Banner-surfaced backend warnings (e.g. "PDF has 52 pages but cap is 40 …").
+  // Each entry: { file: string, message: string }. Cleared at the start of every
+  // extraction run AND on user dismiss — but never on unrelated re-renders.
+  const [extractWarnings, setExtractWarnings] = useState([])
+
   const uploadRegionRef = useRef(null)
 
   const addFiles = (fileList) => {
@@ -91,6 +96,7 @@ export default function S4_VolumeEntry() {
     if (pending.length === 0 || extracting) return
 
     setExtractError(null)
+    setExtractWarnings([])   // new run wipes stale warnings; new ones will replace
     setExtracting(true)
     setFiles((prev) =>
       prev.map((f) => (f.status === 'pending' ? { ...f, status: 'processing' } : f))
@@ -118,8 +124,9 @@ export default function S4_VolumeEntry() {
         })
       )
 
-      // Flatten agent intersections
+      // Flatten agent intersections + collect backend warnings
       const agentInts = []
+      const newWarnings = []
       for (const result of data.results || []) {
         for (const inter of result.intersections || []) {
           agentInts.push({
@@ -128,7 +135,16 @@ export default function S4_VolumeEntry() {
             vendorDetected: result.vendor_detected,
           })
         }
+        if (Array.isArray(result.warnings)) {
+          for (const message of result.warnings) {
+            newWarnings.push({
+              file: result.source_file || '(unknown file)',
+              message,
+            })
+          }
+        }
       }
+      if (newWarnings.length > 0) setExtractWarnings(newWarnings)
 
       // Match against the latest project intersections (avoid stale state)
       const projectInts = getIntersections()
@@ -220,6 +236,32 @@ export default function S4_VolumeEntry() {
 
   return (
     <div className="di-s4">
+      {extractWarnings.length > 0 && (
+        <div className="di-s4__warnings" role="alert">
+          <div className="di-s4__warn-header">
+            <AlertTriangle size={16} className="di-s4__warn-icon" />
+            <span className="di-s4__warn-title">
+              Some data was dropped during extraction
+            </span>
+            <button
+              type="button"
+              className="di-s4__warn-dismiss"
+              aria-label="Dismiss warnings"
+              onClick={() => setExtractWarnings([])}
+            >
+              <X size={14} />
+            </button>
+          </div>
+          <ul className="di-s4__warn-list">
+            {extractWarnings.map((w, i) => (
+              <li key={i} className="di-s4__warn-row">
+                <span className="di-s4__warn-file">{w.file}:</span> {w.message}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       <div className="di-s4__upload-region" ref={uploadRegionRef}>
         <UploadBar
           files={files}
