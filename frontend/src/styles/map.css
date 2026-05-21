@@ -210,12 +210,43 @@
 
 .di-int {
   display: flex;
-  gap: 12px;
+  align-items: flex-start;
+  gap: 10px;
   padding: 10px;
   border-radius: 8px;
-  transition: background 120ms;
+  background: transparent;
+  transition: background 120ms, box-shadow 120ms;
+  touch-action: manipulation;
 }
 .di-int:hover { background: var(--bg-hover); }
+.di-int:hover .di-int__drag { color: var(--text-secondary); }
+.di-int--dragging {
+  background: var(--bg-hover);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45), 0 0 0 1px var(--border-strong);
+  z-index: 10;
+  position: relative;
+}
+.di-int__drag {
+  background: transparent;
+  border: none;
+  padding: 0;
+  width: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  align-self: stretch;
+  color: var(--text-tertiary);
+  cursor: grab;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+.di-int__drag:hover { color: var(--text-primary); background: var(--bg-hover); }
+.di-int__drag:active,
+.di-int--dragging .di-int__drag { cursor: grabbing; color: var(--text-primary); }
+.di-int__drag:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
 .di-int__num {
   width: 28px;
   height: 28px;

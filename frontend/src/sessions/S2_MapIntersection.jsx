@@ -10,6 +10,7 @@ import IntersectionList from '../components/IntersectionList'
 import {
   getIntersections,
   setIntersections as persistIntersections,
+  reorderIntersections,
   setCorridorDir,
 } from '../store/projectStore'
 import { reverseGeocode } from '../lib/photon'
@@ -153,6 +154,23 @@ export default function S2_MapIntersection() {
     setIntersections(next)
   }
 
+  // Atomic: build the reordered list with renumbered `num` in a single setState,
+  // mirroring the store-side reorderIntersections (which the persist effect calls).
+  const handleReorder = (orderedIds) => {
+    const byId = new Map(intersections.map((it) => [it.id, it]))
+    const next = orderedIds
+      .map((id, i) => {
+        const it = byId.get(id)
+        return it ? { ...it, num: i + 1 } : null
+      })
+      .filter(Boolean)
+    if (next.length !== intersections.length) return
+    setIntersections(next)
+    // Belt-and-braces store-side reorder so the new order is canonical even if
+    // a parallel render swallowed the effect (e.g. unmount mid-drag).
+    reorderIntersections(orderedIds)
+  }
+
   const handleContinue = () => {
     const dir = detectCorridorDir(intersections)
     const sorted = sortAlongCorridor(intersections, dir).map((it, i) => ({
@@ -178,6 +196,7 @@ export default function S2_MapIntersection() {
         intersections={intersections}
         onEdit={openEdit}
         onRemove={handleRemove}
+        onReorder={handleReorder}
         onContinue={handleContinue}
         canContinue={intersections.length >= 2}
       />

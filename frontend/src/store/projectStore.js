@@ -70,6 +70,22 @@ export function setIntersections(list) {
   _emit()
 }
 
+// Atomic reorder: caller passes intersection IDs in the desired visual order.
+// All `num` fields are reassigned (1..N) and the whole list is written in one
+// emit, so subscribers never observe transient duplicate or missing numbers.
+export function reorderIntersections(orderedIds) {
+  const current = getIntersections()
+  const byId = new Map(current.map((it) => [it.id, it]))
+  const reordered = []
+  for (let i = 0; i < orderedIds.length; i++) {
+    const it = byId.get(orderedIds[i])
+    if (it) reordered.push({ ...it, num: i + 1 })
+  }
+  // Defensive: if the caller dropped or added IDs, fall back to a no-op.
+  if (reordered.length !== current.length) return
+  setIntersections(reordered)
+}
+
 export function getCorridorDir() {
   return getSnapshot().analysis?.corridorDir ?? null
 }

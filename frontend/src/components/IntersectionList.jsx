@@ -1,12 +1,45 @@
-import { Pencil, Trash2, MapPin } from 'lucide-react'
+import { Pencil, Trash2, MapPin, GripVertical } from 'lucide-react'
+import {
+  DndContext,
+  PointerSensor,
+  KeyboardSensor,
+  useSensor,
+  useSensors,
+  closestCenter,
+} from '@dnd-kit/core'
+import {
+  SortableContext,
+  useSortable,
+  arrayMove,
+  sortableKeyboardCoordinates,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
 
 export default function IntersectionList({
   intersections,
   onEdit,
   onRemove,
+  onReorder,
   onContinue,
   canContinue,
 }) {
+  const sensors = useSensors(
+    // Require a small drag distance so clicks on Edit/Remove buttons still fire.
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  )
+
+  const handleDragEnd = (event) => {
+    const { active, over } = event
+    if (!over || active.id === over.id) return
+    const oldIndex = intersections.findIndex((it) => it.id === active.id)
+    const newIndex = intersections.findIndex((it) => it.id === over.id)
+    if (oldIndex === -1 || newIndex === -1) return
+    const reorderedIds = arrayMove(intersections, oldIndex, newIndex).map((it) => it.id)
+    onReorder(reorderedIds)
+  }
+
   return (
     <aside className="di-side">
       <div className="di-side__header">
@@ -21,24 +54,26 @@ export default function IntersectionList({
             <span>Click the map to add your first intersection</span>
           </div>
         ) : (
-          intersections.map((it, idx) => (
-            <div key={it.id} className="di-int">
-              <div className="di-int__num">{it.num}</div>
-              <div className="di-int__body">
-                <div className="di-int__name" title={it.name}>{it.name}</div>
-                <div className="di-int__pills">
-                  <span className="di-int__pill">{it.control}</span>
-                  <span className="di-int__pill">{it.legs}</span>
-                  <span className="di-int__pill">{it.mainDir}</span>
-                  <span className="di-int__pill">{it.crossDir}</span>
-                </div>
-              </div>
-              <div className="di-int__actions">
-                <button type="button" aria-label="Edit"   onClick={() => onEdit(idx)}><Pencil size={14}/></button>
-                <button type="button" aria-label="Remove" onClick={() => onRemove(idx)}><Trash2 size={14}/></button>
-              </div>
-            </div>
-          ))
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCenter}
+            onDragEnd={handleDragEnd}
+          >
+            <SortableContext
+              items={intersections.map((it) => it.id)}
+              strategy={verticalListSortingStrategy}
+            >
+              {intersections.map((it, idx) => (
+                <SortableIntersection
+                  key={it.id}
+                  it={it}
+                  idx={idx}
+                  onEdit={onEdit}
+                  onRemove={onRemove}
+                />
+              ))}
+            </SortableContext>
+          </DndContext>
         )}
       </div>
 
@@ -56,5 +91,53 @@ export default function IntersectionList({
         </button>
       </div>
     </aside>
+  )
+}
+
+function SortableIntersection({ it, idx, onEdit, onRemove }) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: it.id })
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+  }
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className={`di-int${isDragging ? ' di-int--dragging' : ''}`}
+    >
+      <button
+        type="button"
+        className="di-int__drag"
+        aria-label={`Drag intersection ${it.num} to reorder`}
+        {...attributes}
+        {...listeners}
+      >
+        <GripVertical size={14} />
+      </button>
+      <div className="di-int__num">{it.num}</div>
+      <div className="di-int__body">
+        <div className="di-int__name" title={it.name}>{it.name}</div>
+        <div className="di-int__pills">
+          <span className="di-int__pill">{it.control}</span>
+          <span className="di-int__pill">{it.legs}</span>
+          <span className="di-int__pill">{it.mainDir}</span>
+          <span className="di-int__pill">{it.crossDir}</span>
+        </div>
+      </div>
+      <div className="di-int__actions">
+        <button type="button" aria-label="Edit"   onClick={() => onEdit(idx)}><Pencil size={14}/></button>
+        <button type="button" aria-label="Remove" onClick={() => onRemove(idx)}><Trash2 size={14}/></button>
+      </div>
+    </div>
   )
 }
