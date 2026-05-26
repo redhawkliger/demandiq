@@ -253,3 +253,296 @@ def run_qc(intersections, unbalanced_volumes, extracted_meta, balanced, corridor
                 })
 
     return flags
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Stage 3a: network-aware solver (ported from balancer_reference.py)
+#
+# This sits ALONGSIDE balance_corridor + run_qc above. The old single-corridor
+# /balance endpoint keeps calling those. The new /balance-network endpoint
+# calls balance_network() below. Both modes (conservative + furness) are
+# ported here for a clean Stage 3b seam — but only Furness is exposed via
+# the toggle in Stage 3a per the build sequencing.
+# ──────────────────────────────────────────────────────────────────────────────
+
+# Movement sets per balancing direction (spec §2).
+#   OUTFLOW feeders = movements that LEAVE in that direction (through + 2 turns).
+#   outflow_u       = U-turn that physically heads in that direction.
+#                     Counted in the OUTFLOW total, NEVER receives delta.
+#   APPROACH moves  = movements that ARRIVE from that direction.
+DIRECTION_SPEC = {
+    'EB': {'outflow': ['EBT', 'SBL', 'NBR'], 'outflow_u': 'WBU', 'approach': ['EBL', 'EBT', 'EBR']},
+    'WB': {'outflow': ['WBT', 'NBL', 'SBR'], 'outflow_u': 'EBU', 'approach': ['WBL', 'WBT', 'WBR']},
+    'NB': {'outflow': ['NBT', 'EBL', 'WBR'], 'outflow_u': 'SBU', 'approach': ['NBL', 'NBT', 'NBR']},
+    'SB': {'outflow': ['SBT', 'WBL', 'EBR'], 'outflow_u': 'NBU', 'approach': ['SBL', 'SBT', 'SBR']},
+}
+
+
+def _outflow(m, dirn):
+    s = DIRECTION_SPEC[dirn]
+    return sum(m.get(k, 0) for k in s['outflow']) + m.get(s['outflow_u'], 0)
+
+
+def _approach(m, dirn):
+    s = DIRECTION_SPEC[dirn]
+    return sum(m.get(k, 0) for k in s['approach'])
+
+
+def _link_delta(up, dn, dirn):
+    """downstream approach minus upstream outflow. Zero = balanced."""
+    return _approach(dn, dirn) - _outflow(up, dirn)
+
+
+def _adjust_conservative(v, u, d, dirn, tol):
+    """Raise whichever side is LOWER up to the higher, distributing the delta
+    proportional to each movement's share. Only ever ADDS → floor is automatic.
+    Ported verbatim from balancer_reference.py.
+
+    NOTE: Stage 3a leaves the S5 toggle wired to Furness only. This function
+    exists so Stage 3b only needs to flip the toggle and verify hand-worked
+    Conservative numbers — no algorithmic work."""
+    delta = _link_delta(v[u], v[d], dirn)
+    if abs(delta) < tol:
+        return
+    s = DIRECTION_SPEC[dirn]
+    if delta > 0:
+        # downstream wants more than upstream sends → raise UPSTREAM outflow feeders
+        tot = _outflow(v[u], dirn)
+        if tot <= 0:
+            return
+        for k in s['outflow']:                     # U-turn excluded from receiving
+            v[u][k] += delta * (v[u][k] / tot)
+    else:
+        # upstream sends more than downstream takes → raise DOWNSTREAM approach moves
+        tot = _approach(v[d], dirn)
+        if tot <= 0:
+            return
+        for k in s['approach']:
+            v[d][k] += abs(delta) * (v[d][k] / tot)
+
+
+def _adjust_furness(v, u, d, dirn, tol):
+    """Move both sides toward their average. No floor. NCHRP 255 proportional
+    balancing. Ported verbatim from balancer_reference.py."""
+    s = DIRECTION_SPEC[dirn]
+    o = _outflow(v[u], dirn)
+    a = _approach(v[d], dirn)
+    if abs(a - o) < tol:
+        return
+    target = (o + a) / 2
+    if o > 0:
+        f = target / o
+        for k in s['outflow']:
+            v[u][k] *= f
+    if a > 0:
+        f = target / a
+        for k in s['approach']:
+            v[d][k] *= f
+
+
+def _round_up_5(x):
+    """Round UP to next multiple of 5, except exact-0 stays 0."""
+    if abs(x) < 1e-9:
+        return 0
+    import math
+    return int(math.ceil(x / 5.0) * 5)
+
+
+def _round_and_reconcile(v, links_dir, adjust_fn, tol):
+    """Round every value up to next 5 (0 stays 0), then ONE reconciliation
+    pass so rounding doesn't leave small residual deltas, then re-round."""
+    for i in v:
+        for k in v[i]:
+            v[i][k] = _round_up_5(v[i][k])
+    for u, d, dn in links_dir:
+        adjust_fn(v, u, d, dn, tol)
+    for i in v:
+        for k in v[i]:
+            v[i][k] = _round_up_5(v[i][k])
+    return v
+
+
+def detect_chains(links_dir):
+    """Group links into chains. Two links are in the same chain iff they share
+    an intersection AND have the same direction. A shared intersection
+    participates in multiple chains independently (one per direction).
+
+    Implementation: per-direction union-find over node ids.
+
+    Returns: list of dicts, one per chain:
+        { 'id': 'chain_eb_0', 'direction': 'EB',
+          'intersections': [sorted node ids],
+          'edges': [(u, d, direction), ...] }
+    """
+    from collections import defaultdict
+
+    # Index edges by direction
+    by_dir = defaultdict(list)
+    for u, d, dn in links_dir:
+        by_dir[dn].append((u, d))
+
+    chains = []
+    for dn in sorted(by_dir.keys()):           # deterministic order
+        edges = by_dir[dn]
+        parent = {}
+
+        def find(x):
+            while parent[x] != x:
+                parent[x] = parent[parent[x]]
+                x = parent[x]
+            return x
+
+        def union(a, b):
+            ra, rb = find(a), find(b)
+            if ra != rb:
+                parent[ra] = rb
+
+        for u, d in edges:
+            if u not in parent: parent[u] = u
+            if d not in parent: parent[d] = d
+            union(u, d)
+
+        comp_nodes = defaultdict(set)
+        comp_edges = defaultdict(list)
+        for u, d in edges:
+            r = find(u)
+            comp_nodes[r].add(u)
+            comp_nodes[r].add(d)
+            comp_edges[r].append((u, d, dn))
+
+        for idx, r in enumerate(sorted(comp_nodes.keys(), key=lambda x: (str(type(x)), x))):
+            chains.append({
+                'id': f'chain_{dn.lower()}_{idx}',
+                'direction': dn,
+                'intersections': sorted(comp_nodes[r], key=lambda x: (str(type(x)), x)),
+                'edges': comp_edges[r],
+            })
+    return chains
+
+
+def balance_network(
+    raw_volumes,
+    links_dir,
+    mode='furness',
+    max_iter=500,
+    tol=1e-6,
+    round_final=True,
+):
+    """Shared solver scaffolding for both modes (spec §6, §9).
+
+    Args:
+        raw_volumes: { int_id: { movement: float } } — full precision input.
+        links_dir:   [(upstream_id, downstream_id, direction), ...]
+                     Direction is 'EB' | 'WB' | 'NB' | 'SB'.
+        mode:        'conservative' | 'furness' — Stage 3a wires Furness only
+                     from the endpoint, but both adjustment fns are present.
+        max_iter:    iteration cap.
+        tol:         convergence tolerance (absolute, on link_delta in vehicles).
+        round_final: round up to next 5 + one reconciliation pass.
+
+    Returns:
+        {
+          'balanced': { int_id: { movement: number } },
+          'chains':   [{ id, direction, intersections, iterations, converged,
+                         final_max_delta, log: [{iteration, max_delta}] }],
+          'iterations': global iters_used,
+          'converged': True iff ALL chains converged,
+          'final_max_delta': max across all links,
+          'mode': mode,
+        }
+
+    The solver walks EVERY link each iteration (spec §6: global convergence
+    loop catches cross-direction shared-movement interference). Per-chain
+    final_max_delta is computed from that chain's edges only.
+    """
+    import copy
+    v = copy.deepcopy(raw_volumes)
+    adjust = _adjust_conservative if mode == 'conservative' else _adjust_furness
+    chains = detect_chains(links_dir)
+
+    def chain_max_delta(chain):
+        return max(
+            (abs(_link_delta(v[u], v[d], dn)) for u, d, dn in chain['edges']),
+            default=0.0,
+        )
+
+    def global_max_delta():
+        return max(
+            (abs(_link_delta(v[u], v[d], dn)) for u, d, dn in links_dir),
+            default=0.0,
+        )
+
+    # Per-chain iteration log: [{'iteration': N, 'max_delta': float}, ...]
+    chain_logs = {c['id']: [] for c in chains}
+
+    iters_used = 0
+    converged = False
+    for it in range(max_iter):
+        # Pre-iter snapshot of per-chain max delta (so log[0] is the starting state)
+        for c in chains:
+            chain_logs[c['id']].append({
+                'iteration': it,
+                'max_delta': chain_max_delta(c),
+            })
+
+        if global_max_delta() < tol:
+            converged = True
+            iters_used = it
+            break
+
+        for u, d, dn in links_dir:
+            adjust(v, u, d, dn, tol)
+        iters_used = it + 1
+
+    # Capture pre-rounding convergence per chain — that's the algorithm's real
+    # answer. Post-rounding can introduce small residuals (a few veh per link)
+    # that are expected and acceptable; we report them separately.
+    pre_round_chain_delta = {c['id']: chain_max_delta(c) for c in chains}
+
+    if round_final and len(links_dir) > 0:
+        v = _round_and_reconcile(v, links_dir, adjust, tol)
+
+    chain_results = []
+    for c in chains:
+        pre = pre_round_chain_delta[c['id']]
+        post = chain_max_delta(c)
+        chain_results.append({
+            'id': c['id'],
+            'direction': c['direction'],
+            'intersections': c['intersections'],
+            'iterations': iters_used,
+            'converged': pre < tol,                    # algorithm convergence
+            'final_max_delta': pre,                    # pre-round (true result)
+            'post_round_max_delta': post,              # informational
+            'log': chain_logs[c['id']],
+        })
+
+    return {
+        'balanced': v,
+        'chains': chain_results,
+        'iterations': iters_used,
+        'converged': all(c['converged'] for c in chain_results),
+        'final_max_delta': max(pre_round_chain_delta.values(), default=0.0),
+        'mode': mode,
+    }
+
+
+def network_qc_flags(intersections, links_dir, balanced):
+    """Per spec §6: orphan intersections (no links) pass through unchanged AND
+    get a QC flag. Returns a list of {'check', 'int', 'message'} dicts."""
+    linked = set()
+    for u, d, _dn in links_dir:
+        linked.add(u)
+        linked.add(d)
+    flags = []
+    for it in intersections:
+        n = it.get('num')
+        if n is None:
+            continue
+        if n not in linked:
+            flags.append({
+                'check': 'NB-01',
+                'int': n,
+                'message': f"Int {n} has no links — not balanced (orphan)",
+            })
+    return flags

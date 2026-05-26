@@ -110,6 +110,77 @@
   gap: 12px;
   margin-bottom: 18px;
 }
+/* ── Stage 3a: per-chain summary ─────────────────────────────────────── */
+.di-s6-chains {
+  margin-top: 18px;
+  padding: 14px 16px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+.di-s6-chains__title {
+  margin: 0 0 10px;
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+.di-s6-chains__list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.di-s6-chain {
+  padding: 10px 12px;
+  background: var(--bg-base);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.di-s6-chain__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+.di-s6-chain__pill {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  padding: 2px 8px;
+  border-radius: 4px;
+  color: #FFFFFF;
+}
+.di-s6-chain__pill--eb,
+.di-s6-chain__pill--wb { background: #0A84FF; }
+.di-s6-chain__pill--nb,
+.di-s6-chain__pill--sb { background: #FFB627; color: #1A1A1A; }
+.di-s6-chain__nodes {
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+.di-s6-chain__stats {
+  display: flex;
+  gap: 18px;
+  font-size: 11px;
+}
+.di-s6-chain__row { display: inline-flex; align-items: center; gap: 6px; }
+.di-s6-chain__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+.di-s6-chain__dot--ok { background: #34D399; }
+.di-s6-chain__dot--warn { background: #FFB627; }
+.di-s6-chain__period {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.di-s6-chain__detail {
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
 .di-s6-pcard {
   background: var(--bg-elevated);
   border: 1px solid var(--border);

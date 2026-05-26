@@ -5,6 +5,7 @@ import { Loader2, Check, AlertTriangle, ArrowUp, ArrowDown } from 'lucide-react'
 import {
   subscribe,
   getSnapshot,
+  getLinks,
   applyBalancedRun,
   setLastRun,
 } from '../store/projectStore'
@@ -27,19 +28,11 @@ function hasAnyVolumes(intersections) {
   return false
 }
 
-// Build the /balance payload from the current store state.
-function buildPayload(intersections, balancing) {
+// Build the /balance-network payload (Stage 3a).
+// Links are pulled from the Stage 1 store via getLinks() and mapped from
+// intersection.id → intersection.num for the backend, which keys volumes by num.
+function buildPayload(intersections, balancing, links) {
   const numByPin = new Map(intersections.map((it) => [it.id, it.num]))
-
-  const balance_config = {}
-  for (const [linkId, cfg] of Object.entries(balancing.linkBalanceModes ?? {})) {
-    const [aId, bId] = linkId.split('__')
-    const aNum = numByPin.get(aId)
-    const bNum = numByPin.get(bId)
-    if (aNum != null && bNum != null) {
-      balance_config[`${aNum}-${bNum}`] = cfg
-    }
-  }
 
   const stripVols = (period) => {
     const out = {}
@@ -58,24 +51,28 @@ function buildPayload(intersections, balancing) {
     return out
   }
 
-  const extracted_meta = {}
-  for (const it of intersections) {
-    if (it.phf || it.hvPct) {
-      extracted_meta[String(it.num)] = {
-        AM: { phf: it.phf?.AM, hv_pct: it.hvPct?.AM },
-        PM: { phf: it.phf?.PM, hv_pct: it.hvPct?.PM },
-      }
-    }
+  // Convert store links (id-based) → endpoint links (num-based)
+  const networkLinks = []
+  for (const L of links) {
+    const fromNum = numByPin.get(L.fromId)
+    const toNum = numByPin.get(L.toId)
+    if (fromNum == null || toNum == null) continue
+    networkLinks.push({
+      fromNum,
+      toNum,
+      direction: L.direction,
+      mode: L.mode ?? 'Full',
+    })
   }
 
   return {
     intersections: intersections.map((it) => ({ num: it.num, name: it.name })),
     unbalanced_volumes: { AM: stripVols('AM'), PM: stripVols('PM') },
-    extracted_meta,
-    corridor_dir: balancing.corridorDir ?? 'EB/WB',
-    convergence_threshold: balancing.convergenceThreshold ?? 0.01,
-    max_iterations: balancing.maxIterations ?? 200,
-    balance_config,
+    links: networkLinks,
+    mode: 'furness',                              // Stage 3a wires Furness only
+    max_iterations: balancing.maxIterations ?? 500,
+    tolerance: balancing.convergenceThreshold ?? 1e-6,
+    round_final: true,
   }
 }
 
@@ -133,8 +130,9 @@ export default function S6_RunAnalysis() {
     setAmIter(0)
     setPmIter(0)
     try {
-      const payload = buildPayload(intersections, balancing)
-      const res = await fetch('/api/balance', {
+      const links = getLinks()
+      const payload = buildPayload(intersections, balancing, links)
+      const res = await fetch('/api/balance-network', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -150,9 +148,11 @@ export default function S6_RunAnalysis() {
       applyBalancedRun(data.balanced)
       setLastRun({
         timestamp: new Date().toISOString(),
-        convergence: data.convergence,
+        mode: data.mode,                                       // Stage 3a: 'furness'
+        chains: data.chains ?? [],                             // new per-chain shape
+        convergence: data.convergence,                         // back-compat shim
         qcFlags: data.qc_flags ?? [],
-        adjustments: data.adjustments ?? { AM: [], PM: [] },
+        adjustments: { AM: [], PM: [] },                       // not produced by new endpoint
       })
       setStatus('animating')
     } catch (err) {
@@ -235,8 +235,9 @@ export default function S6_RunAnalysis() {
             </button>
             {!hasResults && status === 'idle' && (
               <span className="di-s6-run__hint">
-                Calls /api/balance with NCHRP 255 Furness/Fratar balancing.
-                Typically converges in 5-15 iterations (~1-2 seconds).
+                Calls /api/balance-network with NCHRP 255 Furness balancing,
+                walking every link in your project network. Per-chain convergence
+                shown below after the run.
               </span>
             )}
           </div>
@@ -246,6 +247,20 @@ export default function S6_RunAnalysis() {
             <div className="di-s6-pcards">
               <PeriodCard period="AM" log={amLog} currentIter={amIter} threshold={threshold} done={status === 'done'} />
               <PeriodCard period="PM" log={pmLog} currentIter={pmIter} threshold={threshold} done={status === 'done'} />
+            </div>
+          )}
+
+          {/* Per-chain summary (Stage 3a) */}
+          {hasResults && (lastRun.chains?.length ?? 0) > 0 && (
+            <div className="di-s6-chains">
+              <h3 className="di-s6-chains__title">
+                Chains ({lastRun.chains.length})
+              </h3>
+              <div className="di-s6-chains__list">
+                {lastRun.chains.map((c) => (
+                  <ChainRow key={c.id} chain={c} />
+                ))}
+              </div>
             </div>
           )}
 
@@ -288,6 +303,41 @@ export default function S6_RunAnalysis() {
 }
 
 // ── Sub-components ──────────────────────────────────────────────────────
+
+function ChainRow({ chain }) {
+  const am = chain.convergence?.AM
+  const pm = chain.convergence?.PM
+  const dot = (conv) => conv?.converged ? 'di-s6-chain__dot--ok' : 'di-s6-chain__dot--warn'
+  const fmt = (conv) => {
+    if (!conv) return '—'
+    const status = conv.converged ? 'converged' : 'no conv'
+    return `${conv.iterations} iter · ${status} · max Δ ${conv.final_max_delta.toFixed(2)}`
+  }
+  return (
+    <div className="di-s6-chain">
+      <div className="di-s6-chain__head">
+        <span className={`di-s6-chain__pill di-s6-chain__pill--${chain.direction.toLowerCase()}`}>
+          {chain.direction}
+        </span>
+        <span className="di-s6-chain__nodes">
+          Intersections {chain.intersections.join(' → ')}
+        </span>
+      </div>
+      <div className="di-s6-chain__stats">
+        <div className="di-s6-chain__row">
+          <span className={`di-s6-chain__dot ${dot(am)}`} />
+          <span className="di-s6-chain__period">AM</span>
+          <span className="di-s6-chain__detail">{fmt(am)}</span>
+        </div>
+        <div className="di-s6-chain__row">
+          <span className={`di-s6-chain__dot ${dot(pm)}`} />
+          <span className="di-s6-chain__period">PM</span>
+          <span className="di-s6-chain__detail">{fmt(pm)}</span>
+        </div>
+      </div>
+    </div>
+  )
+}
 
 function CfgRow({ k, v }) {
   return (

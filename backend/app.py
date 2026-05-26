@@ -30,6 +30,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Font, Alignment, PatternFill
 
 from count_agent import extract, MOVEMENTS
+from balancer import balance_network, network_qc_flags
 from balancer import balance_corridor, run_qc
 from line_diagram import render_single_diagram, VIEW_MODES, FIG_INCHES, DPI
 from excel_export import build_workbook
@@ -295,6 +296,199 @@ async def balance_endpoint(payload: dict):
         },
         "qc_flags": qc_flags,
     }
+
+
+@app.post("/balance-network", dependencies=[Depends(require_auth)])
+async def balance_network_endpoint(payload: dict):
+    """Stage 3a: link-driven network balancing.
+
+    Sits alongside the legacy /balance endpoint (which is unchanged and still
+    used for single-corridor Furness). This new endpoint accepts an explicit
+    links list and produces per-chain results per the spec §9 shape.
+
+    Payload:
+      {
+        "intersections": [{"num": int, "name": str}, ...],   // ordered list
+        "unbalanced_volumes": {"AM": {num_str: {mv: val}}, "PM": {...}},
+        "links": [
+          {"fromNum": int, "toNum": int, "direction": "EB"|"WB"|"NB"|"SB",
+           "mode": "Full"|"Land Use"|"None"}
+        ],
+        "mode": "furness" | "conservative",       // default 'furness' for 3a
+        "max_iterations": int,                    // optional
+        "tolerance": float,                       // optional (absolute, vehicles)
+        "round_final": bool                       // optional, default true
+      }
+
+    Response (per spec §9):
+      {
+        "balanced": {"AM": {num_str: {mv: val}}, "PM": {...}},
+        "mode": "furness",
+        "chains": [{ "id", "direction", "intersections",
+                     "convergence": {"AM": {...}, "PM": {...}} }, ...],
+        "iterations": {"AM": int, "PM": int},
+        "converged": {"AM": bool, "PM": bool},
+        "qc_flags": [...],
+
+        // S6-compat shim (until Stage 4 rewires S6 to chains-native):
+        "convergence": {"AM": {iterations_used, converged, final_gap, log},
+                        "PM": {...}},
+      }
+    """
+    intersections = payload.get("intersections")
+    if not isinstance(intersections, list) or not intersections:
+        raise HTTPException(status_code=400, detail="intersections must be a non-empty list")
+    for it in intersections:
+        if not isinstance(it, dict) or "num" not in it:
+            raise HTTPException(status_code=400, detail="each intersection needs a num field")
+
+    unbalanced = payload.get("unbalanced_volumes", {})
+    if not isinstance(unbalanced, dict):
+        raise HTTPException(status_code=400, detail="unbalanced_volumes must be a dict")
+
+    links_in = payload.get("links", [])
+    if not isinstance(links_in, list):
+        raise HTTPException(status_code=400, detail="links must be a list")
+
+    mode = payload.get("mode", "furness")
+    if mode not in ("furness", "conservative"):
+        raise HTTPException(status_code=400, detail="mode must be 'furness' or 'conservative'")
+
+    try:
+        max_iter = int(payload.get("max_iterations", 500))
+        tol = float(payload.get("tolerance", 1e-6))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="max_iterations/tolerance must be numeric")
+    round_final = bool(payload.get("round_final", True))
+
+    # Build directed link list — links carry direction and are bidirectional
+    # for balancing purposes (NCHRP: outflow vs approach on the SAME direction
+    # axis). The reference treats each link as one (u, d, dn) tuple with the
+    # spec's outflow→approach contract. Skip mode='None' links per spec.
+    links_dir = []
+    for L in links_in:
+        if not isinstance(L, dict):
+            raise HTTPException(status_code=400, detail="each link must be a dict")
+        f = L.get("fromNum"); t = L.get("toNum")
+        d = L.get("direction"); link_mode = L.get("mode", "Full")
+        if f is None or t is None or d not in DIRECTION_AXES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"link needs fromNum/toNum (int) and direction in {sorted(DIRECTION_AXES)}: got {L}",
+            )
+        if link_mode == "None":
+            continue
+        # Stage 3a/3b conservative+furness operate on a single direction code.
+        # 'EB/WB' link → two directed edges (EB upstream→downstream, WB reverse);
+        # 'NB/SB' link → two directed edges (NB, SB reverse).
+        for ax in DIRECTION_AXES[d]:
+            if ax['reverse']:
+                links_dir.append((int(t), int(f), ax['code']))
+            else:
+                links_dir.append((int(f), int(t), ax['code']))
+
+    # Volumes: cast num str → int, fill missing movement keys with 0 so the
+    # outflow/approach sums always have all 16 keys present.
+    def _cast_period(period_vols):
+        out = {}
+        for n_str, mv_dict in (period_vols or {}).items():
+            n = int(n_str)
+            full = {k: 0.0 for k in ALL_MOVEMENTS}
+            for mv, val in (mv_dict or {}).items():
+                if mv in full and val is not None:
+                    full[mv] = float(val)
+            out[n] = full
+        return out
+
+    am_raw = _cast_period(unbalanced.get("AM", {}))
+    pm_raw = _cast_period(unbalanced.get("PM", {}))
+
+    am_result = balance_network(am_raw, links_dir, mode=mode,
+                                max_iter=max_iter, tol=tol, round_final=round_final)
+    pm_result = balance_network(pm_raw, links_dir, mode=mode,
+                                max_iter=max_iter, tol=tol, round_final=round_final)
+
+    # Per-chain convergence per spec §9 (one dict per chain with AM+PM nested)
+    chains_by_id = {}
+    for c in am_result['chains']:
+        chains_by_id[c['id']] = {
+            'id': c['id'], 'direction': c['direction'], 'intersections': c['intersections'],
+            'convergence': {'AM': {
+                'iterations': c['iterations'],
+                'converged': c['converged'],
+                'final_max_delta': c['final_max_delta'],
+                'log': c['log'],
+            }},
+        }
+    for c in pm_result['chains']:
+        entry = chains_by_id.setdefault(c['id'], {
+            'id': c['id'], 'direction': c['direction'], 'intersections': c['intersections'],
+            'convergence': {},
+        })
+        entry['convergence']['PM'] = {
+            'iterations': c['iterations'],
+            'converged': c['converged'],
+            'final_max_delta': c['final_max_delta'],
+            'log': c['log'],
+        }
+    chains_out = list(chains_by_id.values())
+
+    qc_flags = network_qc_flags(intersections, links_dir, {
+        'AM': am_result['balanced'], 'PM': pm_result['balanced'],
+    })
+
+    # S6-compat shim: synthesize a global AM/PM `convergence` block from the
+    # chain logs so the existing convergence chart keeps working until Stage 4.
+    def _compat(result):
+        # Pick the chain with the most iterations (or the first if all empty).
+        if not result['chains']:
+            return {"iterations_used": 0, "converged": True, "final_gap": 0.0, "log": []}
+        # Build a global log by taking max over all chains at each iteration.
+        max_len = max(len(c['log']) for c in result['chains']) if result['chains'] else 0
+        log = []
+        for i in range(max_len):
+            mx = 0.0
+            for c in result['chains']:
+                if i < len(c['log']):
+                    mx = max(mx, c['log'][i]['max_delta'])
+            log.append({'iteration': i + 1, 'max_relative_gap': mx})
+        return {
+            "iterations_used": result['iterations'],
+            "converged": result['converged'],
+            "final_gap": result['final_max_delta'],
+            "log": log,
+        }
+
+    return {
+        "balanced": {
+            "AM": {str(n): vols for n, vols in am_result['balanced'].items()},
+            "PM": {str(n): vols for n, vols in pm_result['balanced'].items()},
+        },
+        "mode": mode,
+        "chains": chains_out,
+        "iterations": {"AM": am_result['iterations'], "PM": pm_result['iterations']},
+        "converged": {"AM": am_result['converged'], "PM": pm_result['converged']},
+        "qc_flags": qc_flags,
+        # S6-compat shim — remove in Stage 4
+        "convergence": {"AM": _compat(am_result), "PM": _compat(pm_result)},
+    }
+
+
+# 'EB/WB' link → balance EB outflow→approach AND WB outflow→approach (in reverse).
+# 'NB/SB' link → balance NB AND SB (in reverse). Stage 3a/3b treats each as
+# two directed edges so the iteration loop sees both flow directions.
+DIRECTION_AXES = {
+    'EB/WB': [{'code': 'EB', 'reverse': False}, {'code': 'WB', 'reverse': True}],
+    'NB/SB': [{'code': 'NB', 'reverse': False}, {'code': 'SB', 'reverse': True}],
+}
+
+# 16 movement keys including U-turns
+ALL_MOVEMENTS = [
+    'EBL', 'EBT', 'EBR', 'EBU',
+    'WBL', 'WBT', 'WBR', 'WBU',
+    'NBL', 'NBT', 'NBR', 'NBU',
+    'SBL', 'SBT', 'SBR', 'SBU',
+]
 
 
 @app.post("/line-diagram", dependencies=[Depends(require_auth)])
