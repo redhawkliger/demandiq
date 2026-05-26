@@ -457,6 +457,24 @@ def balance_network(
     """
     import copy
     v = copy.deepcopy(raw_volumes)
+
+    # Pre-fill any intersection referenced by a link but missing from
+    # raw_volumes with all-zero movements. Real cause: a project may have
+    # links + AM volumes but no PM data yet — the empty period would
+    # otherwise raise KeyError in chain_max_delta. With zeros, both sides
+    # are 0, _adjust_* short-circuits via the `if o > 0` guard, and the
+    # output reports the link as already balanced.
+    referenced = set()
+    for u, d, _dn in links_dir:
+        referenced.add(u); referenced.add(d)
+    ZERO_MOVES = {k: 0.0 for k in (
+        'EBL','EBT','EBR','EBU', 'WBL','WBT','WBR','WBU',
+        'NBL','NBT','NBR','NBU', 'SBL','SBT','SBR','SBU'
+    )}
+    for n in referenced:
+        if n not in v:
+            v[n] = dict(ZERO_MOVES)
+
     adjust = _adjust_conservative if mode == 'conservative' else _adjust_furness
     chains = detect_chains(links_dir)
 

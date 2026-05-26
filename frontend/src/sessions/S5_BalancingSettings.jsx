@@ -23,6 +23,13 @@ const PEAK_MODE_OPTS = [
   { value: 'Corridor', label: 'Corridor (shared peak)' },
   { value: 'Independent', label: 'Independent (per-intersection peak)' },
 ]
+// Stage 3b: balancing method toggle. Default is Conservative — this is what
+// engineers do by hand and the reason DemandIQ exists. Furness is offered as
+// a NCHRP-255 compatibility path.
+const METHOD_OPTS = [
+  { value: 'conservative', label: 'Conservative' },
+  { value: 'furness',      label: 'Furness' },
+]
 const LINK_MODES = ['Full', 'Land Use', 'None']
 
 // hh:mm string compare works because format is fixed-width zero-padded
@@ -78,6 +85,7 @@ export default function S5_BalancingSettings() {
   // Pull current values, with safe fallbacks during the brief window before the
   // defaults effect persists. UI stays consistent either way.
   const enabled    = balancing.enabled ?? true
+  const method     = balancing.mode ?? 'conservative'
   const corrDir    = balancing.corridorDir ?? 'EB/WB'
   const peakMode   = balancing.peakMode ?? 'Corridor'
   const am         = balancing.amWindow ?? { start: '07:00', end: '09:00' }
@@ -139,6 +147,24 @@ export default function S5_BalancingSettings() {
                 <div className="di-s5-row__sub">When off, volumes pass through to S6 unchanged.</div>
               </div>
               <ToggleSwitch checked={enabled} onChange={(v) => setBalancing({ enabled: v })} />
+            </div>
+
+            <div className="di-s5-row">
+              <div className="di-s5-row__label">
+                Balancing method
+                <div className="di-s5-row__sub">
+                  <strong>Conservative (recommended)</strong>: balanced volumes never fall
+                  below collected counts; excess flows into turning movements.{' '}
+                  <strong>Furness</strong>: standard proportional averaging; may reduce
+                  volumes below collected counts.
+                </div>
+              </div>
+              <Segmented
+                options={METHOD_OPTS}
+                value={method}
+                disabled={!enabled}
+                onChange={(v) => setBalancing({ mode: v })}
+              />
             </div>
 
             <div className="di-s5-row">
@@ -346,13 +372,15 @@ export default function S5_BalancingSettings() {
         <aside className="di-s5__summary">
           <h3 className="di-s5-sum__title">Configuration</h3>
           <p className="di-s5-sum__sub">
-            Method: NCHRP 255 Chapter 8 — Furness/Fratar iterative balancing<br />
-            Mode: Balance to Average
+            {method === 'conservative'
+              ? 'Method: Conservative — DemandIQ default. Floor at raw collected counts; excess distributed across turning movements.'
+              : 'Method: Furness — NCHRP 255 Chapter 8 proportional balancing. May reduce volumes below raw.'}
           </p>
           {!enabled ? (
             <div className="di-s5-sum--off">Balancing disabled — values will pass through.</div>
           ) : (
             <div className="di-s5-sum__list">
+              <SumRow k="Method" v={method === 'conservative' ? 'Conservative' : 'Furness'} />
               <SumRow k="Direction" v={corrDir} />
               <SumRow
                 k="Peak mode"

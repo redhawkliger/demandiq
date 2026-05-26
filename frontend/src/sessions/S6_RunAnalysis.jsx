@@ -69,7 +69,7 @@ function buildPayload(intersections, balancing, links) {
     intersections: intersections.map((it) => ({ num: it.num, name: it.name })),
     unbalanced_volumes: { AM: stripVols('AM'), PM: stripVols('PM') },
     links: networkLinks,
-    mode: 'furness',                              // Stage 3a wires Furness only
+    mode: balancing.mode ?? 'conservative',       // Stage 3b: user-selectable via S5
     max_iterations: balancing.maxIterations ?? 500,
     tolerance: balancing.convergenceThreshold ?? 1e-6,
     round_final: true,
@@ -199,6 +199,7 @@ export default function S6_RunAnalysis() {
           <div className="di-s6-cfg">
             <h3 className="di-s6-cfg__title">Configuration</h3>
             <div className="di-s6-cfg__grid">
+              <CfgRow k="Method"         v={(balancing.mode ?? 'conservative') === 'conservative' ? 'Conservative' : 'Furness'} />
               <CfgRow k="Direction"      v={balancing.corridorDir ?? '—'} />
               <CfgRow k="Peak mode"      v={balancing.peakMode === 'Independent' ? 'Independent' : 'Corridor (shared)'} />
               <CfgRow k="AM window"      v={`${balancing.amWindow?.start ?? '—'} – ${balancing.amWindow?.end ?? '—'}`} />
@@ -235,9 +236,10 @@ export default function S6_RunAnalysis() {
             </button>
             {!hasResults && status === 'idle' && (
               <span className="di-s6-run__hint">
-                Calls /api/balance-network with NCHRP 255 Furness balancing,
-                walking every link in your project network. Per-chain convergence
-                shown below after the run.
+                {(balancing.mode ?? 'conservative') === 'conservative'
+                  ? 'Conservative balancing — floor at collected counts, excess flows into turning movements. Walks every link in the project network.'
+                  : 'Furness balancing — NCHRP 255 proportional averaging, may reduce volumes below collected counts.'}
+                {' '}Per-chain convergence shown below after the run.
               </span>
             )}
           </div>

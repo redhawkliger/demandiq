@@ -375,6 +375,9 @@ export function ensureBalancingDefaults() {
 
   const merged = {
     enabled: cur.enabled ?? true,
+    // Stage 3b: balancing method — 'conservative' (DemandIQ default; floor at
+    // raw counts) or 'furness' (NCHRP 255 proportional; can dip below raw).
+    mode: cur.mode ?? 'conservative',
     corridorDir,
     peakMode: cur.peakMode ?? 'Corridor',
     amWindow: cur.amWindow ?? { start: '07:00', end: '09:00' },
