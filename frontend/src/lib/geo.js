@@ -33,6 +33,16 @@ export function sortAlongCorridor(points, dir) {
   return [...points].sort((a, b) => (dir === 'EW' ? a.lng - b.lng : a.lat - b.lat))
 }
 
+// Suggested link direction between two intersections based on which axis
+// dominates the lat/lng delta. Returns 'EB/WB' (mostly east-west separation)
+// or 'NB/SB' (mostly north-south). Used when the user creates a link by
+// clicking two pins on the S2 map.
+export function suggestDirection(a, b) {
+  const dLat = Math.abs(a.lat - b.lat)
+  const dLng = Math.abs(a.lng - b.lng)
+  return dLng > dLat ? 'EB/WB' : 'NB/SB'
+}
+
 // Great-circle distance between two {lat,lng} in miles.
 export function haversineMi(p1, p2) {
   const R = 3958.8 // Earth radius in miles

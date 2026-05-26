@@ -151,6 +151,198 @@
   50%      { box-shadow: 0 0 0 12px rgba(255, 182, 39, 0.06), 0 2px 8px rgba(0, 0, 0, 0.4); }
 }
 
+/* ── Stage 2: linkable + armed pin states ───────────────────────────── */
+.di-pin--linkable { cursor: pointer; }
+.di-pin--linkable .di-pin__num:hover {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.55), 0 0 0 3px rgba(10, 132, 255, 0.55);
+}
+.di-pin--armed .di-pin__num {
+  background: #FFB627;
+  box-shadow: 0 0 0 5px rgba(255, 182, 39, 0.35), 0 2px 8px rgba(0, 0, 0, 0.55);
+  animation: di-armed-pulse 1.2s ease-in-out infinite;
+}
+@keyframes di-armed-pulse {
+  0%, 100% { box-shadow: 0 0 0 5px rgba(255, 182, 39, 0.35), 0 2px 8px rgba(0, 0, 0, 0.55); }
+  50%      { box-shadow: 0 0 0 10px rgba(255, 182, 39, 0.15), 0 2px 8px rgba(0, 0, 0, 0.55); }
+}
+
+/* ── Stage 2: mode toolbar (bottom-center over the map) ─────────────── */
+/* Bottom-center keeps it clear of the Photon search bar (top-left, 320px wide)
+ * and the bottom-right Leaflet zoom control. */
+.di-s2-mode {
+  position: absolute;
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px;
+  background: var(--bg-base);
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+/* Single toggle: outlined when off (default state), filled accent when on
+ * (link drawing mode active). The label/icon swap (Add links → Done) lives
+ * in the JSX; CSS only handles the on/off chrome. */
+.di-s2-mode__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 14px;
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 120ms, border-color 120ms, color 120ms;
+}
+.di-s2-mode__toggle:hover {
+  background: var(--bg-hover);
+  border-color: var(--accent);
+}
+.di-s2-mode__toggle--on,
+.di-s2-mode__toggle--on:hover {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #FFFFFF;
+}
+.di-s2-mode__hint {
+  padding: 0 8px 0 4px;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  font-style: italic;
+}
+
+/* ── Stage 2: first-time link-mode onboarding hint ──────────────────── */
+/* Top-right of the map area — clears the Photon search bar (top-left) and
+ * the bottom toolbar; dismisses with the "Got it" button. */
+.di-link-hint {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 1100;
+  width: 300px;
+  padding: 14px 16px;
+  background: var(--bg-base);
+  border: 1px solid var(--border-strong);
+  border-left: 3px solid var(--accent);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.55);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.di-link-hint__title {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+.di-link-hint__body {
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+.di-link-hint__dismiss {
+  align-self: flex-end;
+  height: 28px;
+  padding: 0 14px;
+  background: var(--accent);
+  color: #FFFFFF;
+  border: none;
+  border-radius: 6px;
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.di-link-hint__dismiss:hover { opacity: 0.92; }
+
+/* ── Stage 2: link edit popup ───────────────────────────────────────── */
+.di-s2__map { position: relative; }
+.di-link-popup {
+  position: absolute;
+  z-index: 1100;
+  transform: translate(-50%, calc(-100% - 12px));
+  min-width: 200px;
+  padding: 10px 12px;
+  background: var(--bg-base);
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.55);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.di-link-popup__head {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  letter-spacing: 0.02em;
+}
+.di-link-popup__num { color: var(--text-primary); font-weight: 700; }
+.di-link-popup__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.di-link-popup__row label {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.di-link-popup__dir {
+  height: 28px;
+  padding: 0 12px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.di-link-popup__dir:hover { border-color: var(--accent); }
+.di-link-popup__select {
+  height: 28px;
+  padding: 0 8px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 12px;
+}
+.di-link-popup__delete {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 28px;
+  background: transparent;
+  border: 1px solid rgba(176, 65, 62, 0.5);
+  border-radius: 6px;
+  color: #B0413E;
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.di-link-popup__delete:hover {
+  background: rgba(176, 65, 62, 0.1);
+  border-color: #B0413E;
+}
+
 /* ── Side panel ─────────────────────────────────────────────────────── */
 .di-side {
   width: 320px;

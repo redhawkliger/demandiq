@@ -8,13 +8,18 @@ const TILE_URL = 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
 const TILE_ATTR =
   '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
 
-const numberedIcon = (num) =>
+const numberedIcon = (num, { armed = false, linkable = false } = {}) =>
   L.divIcon({
-    className: 'di-pin',
+    className: `di-pin${armed ? ' di-pin--armed' : ''}${linkable ? ' di-pin--linkable' : ''}`,
     html: `<div class="di-pin__num">${num}</div>`,
     iconSize: [32, 32],
     iconAnchor: [16, 16],
   })
+
+// Link polyline colors — direction-coded. EB/WB blue (matches the accent
+// token already used elsewhere), NB/SB amber (matches the warning/needs-volumes
+// token so the two existing UI colors do double duty).
+const LINK_COLORS = { 'EB/WB': '#0A84FF', 'NB/SB': '#FFB627' }
 
 const pendingIcon = L.divIcon({
   className: 'di-pin',
@@ -30,14 +35,18 @@ function ClickHandler({ onClick }) {
 }
 
 // ── Imperative layer manager ──────────────────────────────────────────
-function MapLayers({ intersections, pendingPin }) {
+// `mode` controls interactivity:
+//   'intersections' → existing behavior (non-interactive pins, dashed corridor)
+//   'links'         → pins are clickable to arm/connect; dashed corridor hidden
+//                     to avoid visual confusion with explicit link polylines
+function MapLayers({ intersections, pendingPin, mode, armedId, onIntersectionClick }) {
   const map = useMap()
   const markersRef = useRef([])
   const polylineRef = useRef(null)
   const pendingRef = useRef(null)
   const initialFitRef = useRef(false)
 
-  // Confirmed numbered markers + dashed corridor polyline
+  // Confirmed numbered markers + dashed corridor polyline (corridor hidden in link mode)
   useEffect(() => {
     markersRef.current.forEach((m) => m.remove())
     markersRef.current = []
@@ -46,14 +55,22 @@ function MapLayers({ intersections, pendingPin }) {
       polylineRef.current = null
     }
     intersections.forEach((it) => {
+      const linkable = mode === 'links'
+      const armed = armedId === it.id
       const m = L.marker([it.lat, it.lng], {
-        icon: numberedIcon(it.num),
-        interactive: false,
+        icon: numberedIcon(it.num, { armed, linkable }),
+        interactive: linkable,                 // only clickable in link mode
         keyboard: false,
       }).addTo(map)
+      if (linkable && onIntersectionClick) {
+        m.on('click', (e) => {
+          L.DomEvent.stopPropagation(e)        // don't bubble to map (no new pin)
+          onIntersectionClick(it.id)
+        })
+      }
       markersRef.current.push(m)
     })
-    if (intersections.length >= 2) {
+    if (mode !== 'links' && intersections.length >= 2) {
       polylineRef.current = L.polyline(
         intersections.map((it) => [it.lat, it.lng]),
         {
@@ -65,7 +82,7 @@ function MapLayers({ intersections, pendingPin }) {
         }
       ).addTo(map)
     }
-  }, [intersections, map])
+  }, [intersections, mode, armedId, onIntersectionClick, map])
 
   // Amber pending marker
   useEffect(() => {
@@ -99,6 +116,69 @@ function MapLayers({ intersections, pendingPin }) {
       if (polylineRef.current) polylineRef.current.remove()
       if (pendingRef.current) pendingRef.current.remove()
     }
+  }, [])
+
+  return null
+}
+
+// ── Link polylines ────────────────────────────────────────────────────
+// Renders one straight-line polyline per link, direction-coded by color.
+// CRITICAL: each polyline is drawn as a direct from→to segment — never routed
+// through any other intersection that happens to sit between them on the map.
+// This makes branching/skip topologies (e.g. 5→7 when 6 is between them)
+// render correctly. Clickable only in 'links' mode; otherwise pass-through
+// so existing UX is unchanged.
+function LinkLayers({ intersections, links, mode, selectedLinkId, onSelectLink }) {
+  const map = useMap()
+  const linesRef = useRef([])
+
+  useEffect(() => {
+    linesRef.current.forEach((l) => l.remove())
+    linesRef.current = []
+    const byId = new Map(intersections.map((it) => [it.id, it]))
+
+    for (const link of links) {
+      const from = byId.get(link.fromId)
+      const to = byId.get(link.toId)
+      if (!from || !to) continue  // orphaned link (e.g. intersection deleted) — skip
+      const color = LINK_COLORS[link.direction] || '#0A84FF'
+      const selected = link.id === selectedLinkId
+      const polyline = L.polyline(
+        [[from.lat, from.lng], [to.lat, to.lng]],
+        {
+          color,
+          weight: selected ? 5 : 3.5,
+          opacity: selected ? 1 : 0.9,
+          interactive: mode === 'links',
+          pane: 'overlayPane',     // below markerPane → pins stay clickable
+        }
+      ).addTo(map)
+      if (mode === 'links' && onSelectLink) {
+        polyline.on('click', (e) => {
+          L.DomEvent.stopPropagation(e)
+          const pt = map.latLngToContainerPoint(e.latlng)
+          onSelectLink(link.id, { x: pt.x, y: pt.y })
+        })
+      }
+      linesRef.current.push(polyline)
+    }
+  }, [intersections, links, mode, selectedLinkId, onSelectLink, map])
+
+  // Close popup on map pan/zoom — popup position is computed at click time
+  // and would drift otherwise
+  useEffect(() => {
+    if (!onSelectLink) return
+    const close = () => onSelectLink(null, null)
+    map.on('movestart', close)
+    map.on('zoomstart', close)
+    return () => {
+      map.off('movestart', close)
+      map.off('zoomstart', close)
+    }
+  }, [map, onSelectLink])
+
+  useEffect(() => () => {
+    linesRef.current.forEach((l) => l.remove())
   }, [])
 
   return null
@@ -203,7 +283,19 @@ function SearchBar() {
 }
 
 // ── Public component ──────────────────────────────────────────────────
-export default function MapView({ intersections, pendingPin, onMapClick }) {
+export default function MapView({
+  intersections,
+  pendingPin,
+  onMapClick,
+  // Stage 2 link props — all optional for backward-compat with any caller
+  // that still uses the intersection-only API
+  mode = 'intersections',
+  armedId = null,
+  links = [],
+  selectedLinkId = null,
+  onIntersectionClick,
+  onSelectLink,
+}) {
   return (
     <MapContainer
       center={[39, -96]}
@@ -216,7 +308,20 @@ export default function MapView({ intersections, pendingPin, onMapClick }) {
       <TileLayer url={TILE_URL} attribution={TILE_ATTR} subdomains={['a', 'b', 'c', 'd']} />
       <ZoomControl position="bottomright" />
       <ClickHandler onClick={onMapClick} />
-      <MapLayers intersections={intersections} pendingPin={pendingPin} />
+      <LinkLayers
+        intersections={intersections}
+        links={links}
+        mode={mode}
+        selectedLinkId={selectedLinkId}
+        onSelectLink={onSelectLink}
+      />
+      <MapLayers
+        intersections={intersections}
+        pendingPin={pendingPin}
+        mode={mode}
+        armedId={armedId}
+        onIntersectionClick={onIntersectionClick}
+      />
       <SearchBar />
     </MapContainer>
   )
