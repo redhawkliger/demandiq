@@ -438,3 +438,121 @@
   border: 1px dashed var(--border);
   border-radius: 8px;
 }
+
+/* ── Stage 4: link-resolution radio + info-button + modal ─────────────── */
+.di-s5-row__label-with-info {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.di-s5-info-btn {
+  background: transparent;
+  border: none;
+  padding: 2px;
+  display: inline-flex;
+  align-items: center;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  border-radius: 4px;
+}
+.di-s5-info-btn:hover { color: var(--accent); background: var(--bg-hover); }
+
+.di-radio-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.di-radio {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 120ms, border-color 120ms;
+}
+.di-radio:hover { background: var(--bg-hover); }
+.di-radio__input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+.di-radio__dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 1.5px solid var(--text-tertiary);
+  flex-shrink: 0;
+  position: relative;
+  transition: border-color 120ms;
+}
+.di-radio--on .di-radio__dot {
+  border-color: var(--accent);
+}
+.di-radio--on .di-radio__dot::after {
+  content: '';
+  position: absolute;
+  inset: 2.5px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.di-radio--disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.di-radio--disabled .di-radio__input { cursor: not-allowed; }
+
+/* Modal info content */
+.di-modal--info { width: 600px; }
+.di-modal__close {
+  position: absolute;
+  top: 14px;
+  right: 16px;
+  background: transparent;
+  border: none;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  display: inline-flex;
+}
+.di-modal__close:hover { color: var(--text-primary); background: var(--bg-hover); }
+.di-link-info__body {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.55;
+}
+.di-link-info__body p { margin: 0 0 12px; }
+.di-link-info__body strong { color: var(--text-primary); font-weight: 600; }
+.di-link-info__heading {
+  font-family: var(--font-display);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 12px 0 4px;
+}
+.di-link-info__formula {
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 12px;
+  color: var(--accent);
+  background: var(--bg-elevated);
+  padding: 6px 10px;
+  border-radius: 6px;
+  display: inline-block;
+  margin-bottom: 10px !important;
+}
+.di-link-info__rule {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 16px 0;
+}
+.di-link-info__footnote {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  font-style: italic;
+}

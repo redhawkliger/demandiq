@@ -294,26 +294,21 @@ def _link_delta(up, dn, dirn):
 
 
 def _adjust_conservative(v, u, d, dirn, tol):
-    """Raise whichever side is LOWER up to the higher, distributing the delta
-    proportional to each movement's share. Only ever ADDS → floor is automatic.
-    Ported verbatim from balancer_reference.py.
-
-    NOTE: Stage 3a leaves the S5 toggle wired to Furness only. This function
-    exists so Stage 3b only needs to flip the toggle and verify hand-worked
-    Conservative numbers — no algorithmic work."""
+    """DEPRECATED Stage 3a/3b link-by-link adjustment (cascade-prone on real
+    networks — see /tmp/balance_trace.log diagnostic from 2026-05-27).
+    Kept so /balance-network keeps returning 200 for one cycle while the
+    frontend migrates to /balance-nchrp. Do not call from new code."""
     delta = _link_delta(v[u], v[d], dirn)
     if abs(delta) < tol:
         return
     s = DIRECTION_SPEC[dirn]
     if delta > 0:
-        # downstream wants more than upstream sends → raise UPSTREAM outflow feeders
         tot = _outflow(v[u], dirn)
         if tot <= 0:
             return
-        for k in s['outflow']:                     # U-turn excluded from receiving
+        for k in s['outflow']:
             v[u][k] += delta * (v[u][k] / tot)
     else:
-        # upstream sends more than downstream takes → raise DOWNSTREAM approach moves
         tot = _approach(v[d], dirn)
         if tot <= 0:
             return
@@ -428,7 +423,23 @@ def balance_network(
     tol=1e-6,
     round_final=True,
 ):
-    """Shared solver scaffolding for both modes (spec §6, §9).
+    """DEPRECATED: link-by-link Gauss-Seidel balancer (Stage 3a/3b).
+
+    Cascade-prone on real corridors — see /tmp/balance_trace.log from
+    2026-05-27 showing EBT 1000→1290 / WBT 750→1600 on Bodger AM. Both
+    modes (furness, conservative) are the same homemade per-link
+    adjustment under the hood and share the same iteration-order
+    amplification bug; neither is actually NCHRP. Use balance_nchrp()
+    below for new work — that does real NCHRP 255/765 turning-movement
+    refinement via per-intersection Fratar factoring.
+
+    This function stays around so /balance-network keeps responding for
+    backward compat through one cycle. Slated for removal after S6 cuts
+    over to /balance-nchrp.
+
+    --- Original docstring follows ---
+
+    Shared solver scaffolding for both modes (spec §6, §9).
 
     Args:
         raw_volumes: { int_id: { movement: float } } — full precision input.
@@ -564,3 +575,439 @@ def network_qc_flags(intersections, links_dir, balanced):
                 'message': f"Int {n} has no links — not balanced (orphan)",
             })
     return flags
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Stage 4 / NCHRP rewrite: real per-intersection Fratar factoring.
+#
+# Replaces the link-by-link Gauss-Seidel scheme above (which has a cascade
+# bug — see deprecation notice on balance_network). This is NCHRP 255/765
+# turning-movement refinement: each intersection's 4×4 O-D matrix is
+# Fratar-factored to match link-resolved and raw-derived row/column targets.
+#
+# Four steps:
+#   A) Resolve adjacent-intersection link disagreements into ONE volume per
+#      directed edge (larger or average of the two counts).
+#   B) For every intersection, build a 4×4 matrix and iterate Furness
+#      (row scale → col scale → repeat) until row sums and col sums match
+#      their targets within tol.
+#   C) Floor: clamp every movement to its raw value (balanced ≥ raw).
+#   D) Round up to next multiple of 5; raw==0 stays 0.
+# ══════════════════════════════════════════════════════════════════════════════
+
+# Matrix layout: rows = approach leg (where cars came FROM); cols = exit leg
+# (where cars are heading TO). Indexing follows physical leg orientation:
+#   row 0 = S leg (cars came from south, going NB)
+#   row 1 = N leg (cars came from north, going SB)
+#   row 2 = W leg (cars came from west, going EB)
+#   row 3 = E leg (cars came from east, going WB)
+#   col 0 = S leg exit (cars going SB)
+#   col 1 = N leg exit (cars going NB)
+#   col 2 = W leg exit (cars going WB)
+#   col 3 = E leg exit (cars going EB)
+# Diagonal cells are U-turns (skipped — pass through unchanged per spec).
+CELL_MOVEMENT = {
+    (0, 0): None,  (0, 1): 'NBT', (0, 2): 'NBL', (0, 3): 'NBR',
+    (1, 0): 'SBT', (1, 1): None,  (1, 2): 'SBR', (1, 3): 'SBL',
+    (2, 0): 'EBR', (2, 1): 'EBL', (2, 2): None,  (2, 3): 'EBT',
+    (3, 0): 'WBL', (3, 1): 'WBR', (3, 2): 'WBT', (3, 3): None,
+}
+LEG_INDEX  = {'S': 0, 'N': 1, 'W': 2, 'E': 3}    # leg name → row/col index
+LEG_IN_DIR  = {0: 'NB', 1: 'SB', 2: 'EB', 3: 'WB'}   # cars entering via leg
+LEG_OUT_DIR = {0: 'SB', 1: 'NB', 2: 'WB', 3: 'EB'}   # cars exiting via leg
+
+
+def resolve_link_volumes(volumes, links, method='larger', coords=None):
+    """STEP A — collapse two adjacent intersection counts on the same link
+    into ONE resolved volume per directed edge.
+
+    Args:
+        volumes: { int_num: { movement: value } }
+        links:   [{ 'fromNum': int, 'toNum': int, 'direction': 'EB/WB'|'NB/SB' }]
+        method:  'larger' (default) or 'average'
+        coords:  { int_num: {'lat': float, 'lng': float} } — optional but
+                 strongly recommended. Without coords, num-order is used as a
+                 fallback geographic ordering (assumes lower num is west/south).
+
+    Returns:
+        { (upstream_num, downstream_num, dir_code): resolved_volume }
+        where dir_code is one of 'EB' | 'WB' | 'NB' | 'SB'.
+        EB direction has west→east upstream/downstream; SB has north→south.
+
+    Stores BOTH directions of each link (an EB/WB link produces two entries:
+    one EB, one WB).
+    """
+    coords = coords or {}
+    out = {}
+    for L in links:
+        a, b = int(L['fromNum']), int(L['toNum'])
+        axis = L.get('direction')
+        if axis == 'EB/WB':
+            # Determine which is west by longitude (or fallback: smaller num is west)
+            a_lng = coords.get(a, {}).get('lng')
+            b_lng = coords.get(b, {}).get('lng')
+            if a_lng is not None and b_lng is not None:
+                west, east = (a, b) if a_lng < b_lng else (b, a)
+            else:
+                west, east = (a, b) if a < b else (b, a)
+            for dir_code, up, dn in (('EB', west, east), ('WB', east, west)):
+                up_vols = volumes.get(up, {})
+                dn_vols = volumes.get(dn, {})
+                count_up = sum(up_vols.get(k, 0) for k in DIRECTION_SPEC[dir_code]['outflow'])
+                count_dn = sum(dn_vols.get(k, 0) for k in DIRECTION_SPEC[dir_code]['approach'])
+                resolved = max(count_up, count_dn) if method == 'larger' else (count_up + count_dn) / 2.0
+                out[(up, dn, dir_code)] = float(resolved)
+        elif axis == 'NB/SB':
+            a_lat = coords.get(a, {}).get('lat')
+            b_lat = coords.get(b, {}).get('lat')
+            if a_lat is not None and b_lat is not None:
+                south, north = (a, b) if a_lat < b_lat else (b, a)
+            else:
+                south, north = (a, b) if a < b else (b, a)
+            for dir_code, up, dn in (('NB', south, north), ('SB', north, south)):
+                up_vols = volumes.get(up, {})
+                dn_vols = volumes.get(dn, {})
+                count_up = sum(up_vols.get(k, 0) for k in DIRECTION_SPEC[dir_code]['outflow'])
+                count_dn = sum(dn_vols.get(k, 0) for k in DIRECTION_SPEC[dir_code]['approach'])
+                resolved = max(count_up, count_dn) if method == 'larger' else (count_up + count_dn) / 2.0
+                out[(up, dn, dir_code)] = float(resolved)
+    return out
+
+
+def _build_links_by_int(links, coords=None):
+    """Return { int_num: [(neighbor_num, leg, axis), ...] }.
+
+    leg is 'N' | 'S' | 'E' | 'W' — which physical leg of THIS intersection the
+    link sits on. Determined from coords; falls back to num ordering."""
+    from collections import defaultdict
+    coords = coords or {}
+    out = defaultdict(list)
+    for L in links:
+        a, b = int(L['fromNum']), int(L['toNum'])
+        axis = L.get('direction')
+        if axis == 'EB/WB':
+            a_lng = coords.get(a, {}).get('lng')
+            b_lng = coords.get(b, {}).get('lng')
+            if a_lng is not None and b_lng is not None:
+                a_west = a_lng < b_lng
+            else:
+                a_west = a < b
+            if a_west:
+                out[a].append((b, 'E', axis))
+                out[b].append((a, 'W', axis))
+            else:
+                out[a].append((b, 'W', axis))
+                out[b].append((a, 'E', axis))
+        elif axis == 'NB/SB':
+            a_lat = coords.get(a, {}).get('lat')
+            b_lat = coords.get(b, {}).get('lat')
+            if a_lat is not None and b_lat is not None:
+                a_south = a_lat < b_lat
+            else:
+                a_south = a < b
+            if a_south:
+                out[a].append((b, 'N', axis))
+                out[b].append((a, 'S', axis))
+            else:
+                out[a].append((b, 'S', axis))
+                out[b].append((a, 'N', axis))
+    return out
+
+
+def _leg_present(int_vols, leg):
+    """Is this physical leg present at the intersection? A leg is missing
+    when no link sits on it AND no raw movements involving it are nonzero."""
+    idx = LEG_INDEX[leg]
+    in_dir = LEG_IN_DIR[idx]
+    out_dir = LEG_OUT_DIR[idx]
+    approach_sum = sum(int_vols.get(k, 0) for k in DIRECTION_SPEC[in_dir]['approach'])
+    outflow_sum  = sum(int_vols.get(k, 0) for k in DIRECTION_SPEC[out_dir]['outflow'])
+    return approach_sum > 0 or outflow_sum > 0
+
+
+def intersection_targets(int_num, raw_volumes, links_by_int, resolved_links):
+    """STEP B prep — compute row and column targets for one intersection's 4×4
+    matrix, plus which legs are present (for 3-leg T intersections, the missing
+    leg's row and col are masked).
+
+    Returns:
+        row_targets[0..3]:  float or None (None = leg absent / 3-leg T)
+        col_targets[0..3]:  float or None
+        present[0..3]:      bool — True if that leg exists at this int
+    """
+    int_vols = raw_volumes.get(int_num, {})
+    row_targets = [None] * 4
+    col_targets = [None] * 4
+    present    = [False] * 4
+
+    # Which legs have links?
+    leg_to_link = {}
+    for (neighbor, leg, axis) in links_by_int.get(int_num, []):
+        leg_to_link[leg] = (neighbor, axis)
+
+    for leg, idx in LEG_INDEX.items():
+        in_dir = LEG_IN_DIR[idx]
+        out_dir = LEG_OUT_DIR[idx]
+        if leg in leg_to_link:
+            # Linked leg — targets come from resolved link volumes
+            neighbor, _axis = leg_to_link[leg]
+            row_targets[idx] = resolved_links.get((neighbor, int_num, in_dir), 0.0)
+            col_targets[idx] = resolved_links.get((int_num, neighbor, out_dir), 0.0)
+            present[idx] = True
+        elif _leg_present(int_vols, leg):
+            # Stub leg with raw movements — use raw sums
+            row_targets[idx] = float(sum(int_vols.get(k, 0) for k in DIRECTION_SPEC[in_dir]['approach']))
+            col_targets[idx] = float(sum(int_vols.get(k, 0) for k in DIRECTION_SPEC[out_dir]['outflow']))
+            present[idx] = True
+        # else: leg absent (3-leg T) — targets stay None, present stays False
+
+    return row_targets, col_targets, present
+
+
+def _normalize_targets(row_targets, col_targets, present):
+    """Scale row + col targets so their totals match.
+
+    Furness/Fratar is a doubly-constrained matrix-balancing scheme that
+    assumes conservation at each intersection: total cars entering = total
+    cars exiting. Link-resolved row targets (cars arriving from each leg)
+    and col targets (cars departing toward each leg) are derived from
+    different counts and typically DON'T balance — Int 1 in Bodger has
+    row total ~2030 but col total ~2420.
+
+    Without normalization, Furness oscillates: row-scale gets rows to
+    targets, col-scale gets cols to targets, but the two passes work
+    against each other → 100% non-convergence on real data.
+
+    Fix: scale both target sets to their average total. Each row/col
+    deviates by a small factor (~half of the mismatch) from its raw
+    resolved value, but conservation now holds.
+
+    Returns (normalized_row_targets, normalized_col_targets, mismatch_pct)
+    where mismatch_pct is the original imbalance for QC reporting.
+    """
+    row_sum = sum(t for r, t in enumerate(row_targets) if present[r] and t is not None)
+    col_sum = sum(t for c, t in enumerate(col_targets) if present[c] and t is not None)
+    if row_sum <= 0 or col_sum <= 0:
+        return row_targets, col_targets, 0.0
+    target_total = (row_sum + col_sum) / 2.0
+    mismatch_pct = abs(row_sum - col_sum) / target_total * 100.0
+    rf = target_total / row_sum
+    cf = target_total / col_sum
+    new_row = [t * rf if t is not None else None for t in row_targets]
+    new_col = [t * cf if t is not None else None for t in col_targets]
+    return new_row, new_col, mismatch_pct
+
+
+def furness_intersection(matrix, row_targets, col_targets, present, tol=0.5, max_iter=100):
+    """STEP B — iterate row-column Fratar scaling on a 4×4 matrix until row
+    sums and col sums match their targets within `tol` vehicles, or max_iter
+    reached. Cells in rows/cols of absent legs (present[i]=False) stay 0 and
+    are excluded from sums.
+
+    Returns: (matrix, converged_bool, iters_used)
+    """
+    M = [row[:] for row in matrix]   # local copy
+
+    def row_sum(r):
+        return sum(M[r][c] for c in range(4) if present[c])
+
+    def col_sum(c):
+        return sum(M[r][c] for r in range(4) if present[r])
+
+    iters_used = 0
+    converged = False
+    for it in range(max_iter):
+        # Convergence check
+        max_diff = 0.0
+        for r in range(4):
+            if not present[r] or row_targets[r] is None:
+                continue
+            max_diff = max(max_diff, abs(row_sum(r) - row_targets[r]))
+        for c in range(4):
+            if not present[c] or col_targets[c] is None:
+                continue
+            max_diff = max(max_diff, abs(col_sum(c) - col_targets[c]))
+        if max_diff < tol:
+            converged = True
+            iters_used = it
+            break
+
+        # Row scaling
+        for r in range(4):
+            if not present[r] or row_targets[r] is None:
+                continue
+            cur = row_sum(r)
+            if cur > 0:
+                f = row_targets[r] / cur
+                for c in range(4):
+                    if present[c]:
+                        M[r][c] *= f
+
+        # Column scaling
+        for c in range(4):
+            if not present[c] or col_targets[c] is None:
+                continue
+            cur = col_sum(c)
+            if cur > 0:
+                f = col_targets[c] / cur
+                for r in range(4):
+                    if present[r]:
+                        M[r][c] *= f
+
+        iters_used = it + 1
+
+    return M, converged, iters_used
+
+
+def _build_matrix(int_vols):
+    """Pull the 12 turn movements out of an intersection's raw volume dict
+    into the 4×4 cell layout. Diagonal/U-turn cells stay 0."""
+    M = [[0.0] * 4 for _ in range(4)]
+    for (r, c), mv in CELL_MOVEMENT.items():
+        if mv is None:
+            continue
+        M[r][c] = float(int_vols.get(mv, 0))
+    return M
+
+
+def _extract_matrix(matrix):
+    """Inverse of _build_matrix — pull 12 turn movements back out of the
+    balanced matrix into a {movement: value} dict."""
+    out = {}
+    for (r, c), mv in CELL_MOVEMENT.items():
+        if mv is None:
+            continue
+        out[mv] = matrix[r][c]
+    return out
+
+
+def _round_up_5_nchrp(x, raw_x):
+    """STEP D — round up to next multiple of 5; raw==0 keeps balanced at 0."""
+    import math
+    if raw_x is not None and raw_x == 0:
+        return 0
+    if abs(x) < 1e-9:
+        return 0
+    return int(math.ceil(x / 5.0) * 5)
+
+
+def balance_nchrp(
+    raw_volumes,
+    links,
+    method='larger',
+    coords=None,
+    apply_floor=True,
+    round_to_5=True,
+    tol=0.5,
+    max_iter=100,
+):
+    """Top-level NCHRP 255/765 turning-movement refinement.
+
+    Args:
+        raw_volumes: { int_num: { movement: value } }
+        links:       [{ 'fromNum', 'toNum', 'direction': 'EB/WB'|'NB/SB' }]
+                     Pass `mode: 'None'` links pre-filtered out by caller.
+        method:      'larger' (default) or 'average' — link disagreement
+                     resolution per S5 setting.
+        coords:      { int_num: {'lat','lng'} } — for geographic leg ordering.
+        apply_floor: clamp balanced[mv] ≥ raw[mv] for every nonzero raw.
+        round_to_5:  round balanced up to next multiple of 5.
+        tol:         per-intersection Furness convergence tolerance (veh).
+        max_iter:    cap on Furness iterations per intersection.
+
+    Returns:
+        {
+          'balanced': { int_num: { movement: value } },
+          'resolved_links': { (u, d, dir): float },
+          'qc_flags': [ {check, int, message}, ... ],
+          'iterations': { int_num: int },   # iters used per intersection
+          'converged':  { int_num: bool },
+          'method':     method,
+        }
+    """
+    import copy
+
+    # Step A: resolve link disagreements
+    resolved = resolve_link_volumes(raw_volumes, links, method=method, coords=coords)
+    links_by_int = _build_links_by_int(links, coords=coords)
+
+    # Step B: per-intersection Furness
+    balanced = {}
+    iterations = {}
+    converged_map = {}
+    qc_flags = []
+
+    for int_num, int_vols in raw_volumes.items():
+        row_targets, col_targets, present = intersection_targets(
+            int_num, raw_volumes, links_by_int, resolved
+        )
+        # An intersection with no targets at all (e.g. fully orphaned and
+        # zero-volume) just passes through unchanged.
+        if not any(present):
+            balanced[int_num] = dict(int_vols)
+            iterations[int_num] = 0
+            converged_map[int_num] = True
+            continue
+
+        # Normalize targets to satisfy conservation (sum_row == sum_col).
+        # Without this, Furness oscillates on imbalanced real-world data.
+        row_targets, col_targets, mismatch_pct = _normalize_targets(
+            row_targets, col_targets, present
+        )
+        if mismatch_pct > 5.0:
+            qc_flags.append({
+                'check': 'NCHRP-IMBAL',
+                'int': int_num,
+                'message': f"Int {int_num} row/col totals disagreed by {mismatch_pct:.1f}% before balancing — link-resolved and stub targets were normalized to a common total.",
+            })
+
+        M = _build_matrix(int_vols)
+        M_out, conv, iters_used = furness_intersection(
+            M, row_targets, col_targets, present, tol=tol, max_iter=max_iter
+        )
+        iterations[int_num] = iters_used
+        converged_map[int_num] = conv
+        if not conv:
+            qc_flags.append({
+                'check': 'NCHRP-CONV',
+                'int': int_num,
+                'message': f"Int {int_num} Furness did not converge in {max_iter} iter; max residual remains.",
+            })
+
+        movements = _extract_matrix(M_out)
+        # Carry through U-turns and any other unmodelled movements unchanged
+        full = dict(int_vols)
+        for mv, val in movements.items():
+            full[mv] = val
+        balanced[int_num] = full
+
+    # Step C: floor
+    if apply_floor:
+        for int_num, balanced_vols in balanced.items():
+            raw = raw_volumes.get(int_num, {})
+            for mv, raw_val in raw.items():
+                if mv not in balanced_vols:
+                    continue
+                if raw_val > 0 and balanced_vols[mv] < raw_val:
+                    qc_flags.append({
+                        'check': 'NCHRP-FLOOR',
+                        'int': int_num,
+                        'message': f"Int {int_num} {mv}: floor activated (balanced {balanced_vols[mv]:.1f} < raw {raw_val}); clamped to raw.",
+                    })
+                    balanced_vols[mv] = float(raw_val)
+
+    # Step D: round up to next 5
+    if round_to_5:
+        for int_num, balanced_vols in balanced.items():
+            raw = raw_volumes.get(int_num, {})
+            for mv in list(balanced_vols.keys()):
+                balanced_vols[mv] = _round_up_5_nchrp(balanced_vols[mv], raw.get(mv))
+
+    return {
+        'balanced': balanced,
+        'resolved_links': resolved,
+        'qc_flags': qc_flags,
+        'iterations': iterations,
+        'converged': converged_map,
+        'method': method,
+    }

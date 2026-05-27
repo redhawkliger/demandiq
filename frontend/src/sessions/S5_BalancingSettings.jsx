@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ChevronDown, Lock } from 'lucide-react'
+import { ChevronDown, Lock, Info, X as XIcon } from 'lucide-react'
 
 import {
   subscribe,
@@ -23,12 +23,13 @@ const PEAK_MODE_OPTS = [
   { value: 'Corridor', label: 'Corridor (shared peak)' },
   { value: 'Independent', label: 'Independent (per-intersection peak)' },
 ]
-// Stage 3b: balancing method toggle. Default is Conservative — this is what
-// engineers do by hand and the reason DemandIQ exists. Furness is offered as
-// a NCHRP-255 compatibility path.
-const METHOD_OPTS = [
-  { value: 'conservative', label: 'Conservative' },
-  { value: 'furness',      label: 'Furness' },
+// Stage 4 / NCHRP rewrite: link disagreement resolution. Default is "larger"
+// (max of the two adjacent counts) which is conservative for design-year work.
+// "average" matches standard NCHRP report practice. See the info modal for
+// the full rationale.
+const LINK_RES_OPTS = [
+  { value: 'larger',  label: 'Larger value' },
+  { value: 'average', label: 'Average' },
 ]
 const LINK_MODES = ['Full', 'Land Use', 'None']
 
@@ -84,9 +85,12 @@ export default function S5_BalancingSettings() {
 
   // Pull current values, with safe fallbacks during the brief window before the
   // defaults effect persists. UI stays consistent either way.
-  const enabled    = balancing.enabled ?? true
-  const method     = balancing.mode ?? 'conservative'
-  const corrDir    = balancing.corridorDir ?? 'EB/WB'
+  const enabled        = balancing.enabled ?? true
+  const linkResolution = balancing.linkResolution ?? 'larger'
+  const corrDir        = balancing.corridorDir ?? 'EB/WB'
+
+  // Info modal for link-disagreement explanation
+  const [linkInfoOpen, setLinkInfoOpen] = useState(false)
   const peakMode   = balancing.peakMode ?? 'Corridor'
   const am         = balancing.amWindow ?? { start: '07:00', end: '09:00' }
   const pm         = balancing.pmWindow ?? { start: '16:00', end: '18:00' }
@@ -151,19 +155,28 @@ export default function S5_BalancingSettings() {
 
             <div className="di-s5-row">
               <div className="di-s5-row__label">
-                Balancing method
+                <span className="di-s5-row__label-with-info">
+                  Link disagreement resolution
+                  <button
+                    type="button"
+                    className="di-s5-info-btn"
+                    aria-label="What is link disagreement resolution?"
+                    onClick={() => setLinkInfoOpen(true)}
+                  >
+                    <Info size={14} />
+                  </button>
+                </span>
                 <div className="di-s5-row__sub">
-                  <strong>Conservative (recommended)</strong>: balanced volumes never fall
-                  below collected counts; excess flows into turning movements.{' '}
-                  <strong>Furness</strong>: standard proportional averaging; may reduce
-                  volumes below collected counts.
+                  Adjacent intersection counts on the same segment disagree (different days /
+                  crews). NCHRP 255/765 requires resolving these into one value per link
+                  before balancing turning movements.
                 </div>
               </div>
-              <Segmented
-                options={METHOD_OPTS}
-                value={method}
+              <RadioGroup
+                options={LINK_RES_OPTS}
+                value={linkResolution}
                 disabled={!enabled}
-                onChange={(v) => setBalancing({ mode: v })}
+                onChange={(v) => setBalancing({ linkResolution: v })}
               />
             </div>
 
@@ -372,15 +385,15 @@ export default function S5_BalancingSettings() {
         <aside className="di-s5__summary">
           <h3 className="di-s5-sum__title">Configuration</h3>
           <p className="di-s5-sum__sub">
-            {method === 'conservative'
-              ? 'Method: Conservative — DemandIQ default. Floor at raw collected counts; excess distributed across turning movements.'
-              : 'Method: Furness — NCHRP 255 Chapter 8 proportional balancing. May reduce volumes below raw.'}
+            Method: NCHRP 255/765 turning-movement refinement. Per-intersection
+            Fratar factoring against link-resolved targets. Balanced volumes are
+            floored at raw collected counts and rounded up to the next 5.
           </p>
           {!enabled ? (
             <div className="di-s5-sum--off">Balancing disabled — values will pass through.</div>
           ) : (
             <div className="di-s5-sum__list">
-              <SumRow k="Method" v={method === 'conservative' ? 'Conservative' : 'Furness'} />
+              <SumRow k="Link resolution" v={linkResolution === 'larger' ? 'Larger value' : 'Average'} />
               <SumRow k="Direction" v={corrDir} />
               <SumRow
                 k="Peak mode"
@@ -416,6 +429,108 @@ export default function S5_BalancingSettings() {
           Continue to analysis →
         </button>
       </footer>
+
+      {linkInfoOpen && <LinkResolutionInfoModal onClose={() => setLinkInfoOpen(false)} />}
+    </div>
+  )
+}
+
+// ── Link disagreement resolution — info modal ─────────────────────────────
+function LinkResolutionInfoModal({ onClose }) {
+  // Close on Esc, lock body scroll
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onClose() }
+    document.addEventListener('keydown', onKey)
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => {
+      document.removeEventListener('keydown', onKey)
+      document.body.style.overflow = prev
+    }
+  }, [onClose])
+
+  return (
+    <div className="di-modal-backdrop" onMouseDown={onClose}>
+      <div
+        className="di-modal di-modal--info"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="di-link-info-title"
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        <div className="di-modal__header">
+          <h2 id="di-link-info-title" className="di-modal__title">
+            Link Disagreement Resolution
+          </h2>
+          <button
+            type="button"
+            className="di-modal__close"
+            aria-label="Close"
+            onClick={onClose}
+          >
+            <XIcon size={16} />
+          </button>
+        </div>
+        <div className="di-modal__body di-link-info__body">
+          <p>
+            Adjacent intersection counts on the same segment often disagree because counts
+            are taken on different days, by different crews, or for different durations.
+            NCHRP 255 / 765 requires you to resolve these disagreements before balancing
+            intersection turning movements.
+          </p>
+          <p>
+            <strong>Example:</strong> On a segment between Int 1 and Int 2, Int 1's
+            outflow says 278 cars went east, but Int 2's inflow says only 164 cars
+            arrived from the west. Which is correct?
+          </p>
+          <hr className="di-link-info__rule" />
+          <h3 className="di-link-info__heading">Larger value (default)</h3>
+          <p className="di-link-info__formula">Result: max(278, 164) = 278</p>
+          <p>
+            Treats the higher count as more reliable. Undercounting is more common than
+            overcounting in field surveys. Use this for design-year capacity studies or
+            when counts may have been short-duration. Note: this systematically biases
+            balanced volumes upward, which is conservative for design purposes.
+          </p>
+          <h3 className="di-link-info__heading">Average</h3>
+          <p className="di-link-info__formula">Result: (278 + 164) / 2 = 221</p>
+          <p>
+            Treats both counts as equally reliable. Defensible in reports as standard
+            NCHRP practice. Use when both counts are equal quality.
+          </p>
+          <hr className="di-link-info__rule" />
+          <p className="di-link-info__footnote">
+            The <strong>balanced ≥ raw</strong> floor applies regardless of which option
+            you choose — no turning movement will drop below its collected value after
+            balancing. Final volumes are rounded up to the next multiple of 5.
+          </p>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Radio group (vertical, 2-4 options) ──────────────────────────────────
+function RadioGroup({ options, value, onChange, disabled }) {
+  return (
+    <div className="di-radio-group" role="radiogroup">
+      {options.map((opt) => (
+        <label
+          key={opt.value}
+          className={`di-radio${value === opt.value ? ' di-radio--on' : ''}${disabled ? ' di-radio--disabled' : ''}`}
+        >
+          <input
+            type="radio"
+            className="di-radio__input"
+            value={opt.value}
+            checked={value === opt.value}
+            disabled={disabled}
+            onChange={() => onChange(opt.value)}
+          />
+          <span className="di-radio__dot" />
+          <span className="di-radio__label">{opt.label}</span>
+        </label>
+      ))}
     </div>
   )
 }

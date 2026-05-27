@@ -375,9 +375,13 @@ export function ensureBalancingDefaults() {
 
   const merged = {
     enabled: cur.enabled ?? true,
-    // Stage 3b: balancing method — 'conservative' (DemandIQ default; floor at
-    // raw counts) or 'furness' (NCHRP 255 proportional; can dip below raw).
-    mode: cur.mode ?? 'conservative',
+    // Stage 4 / NCHRP rewrite: link disagreement resolution method.
+    // 'larger' (default) keeps the higher of the two adjacent counts;
+    // 'average' uses the mean. See S5 info modal for full guidance.
+    // The old 'mode' field (conservative/furness) is no longer used — both
+    // were variants of the same buggy link-by-link algorithm and have been
+    // replaced by real NCHRP 255/765 per-intersection Fratar factoring.
+    linkResolution: cur.linkResolution ?? 'larger',
     corridorDir,
     peakMode: cur.peakMode ?? 'Corridor',
     amWindow: cur.amWindow ?? { start: '07:00', end: '09:00' },

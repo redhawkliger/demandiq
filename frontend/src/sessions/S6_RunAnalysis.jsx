@@ -28,9 +28,11 @@ function hasAnyVolumes(intersections) {
   return false
 }
 
-// Build the /balance-network payload (Stage 3a).
+// Build the /balance-nchrp payload (Stage 4 — NCHRP 255/765 rewrite).
 // Links are pulled from the Stage 1 store via getLinks() and mapped from
 // intersection.id → intersection.num for the backend, which keys volumes by num.
+// lat/lng is passed through so the backend can determine geographic ordering
+// (which leg of each intersection a link sits on).
 function buildPayload(intersections, balancing, links) {
   const numByPin = new Map(intersections.map((it) => [it.id, it.num]))
 
@@ -66,13 +68,17 @@ function buildPayload(intersections, balancing, links) {
   }
 
   return {
-    intersections: intersections.map((it) => ({ num: it.num, name: it.name })),
+    intersections: intersections.map((it) => ({
+      num: it.num,
+      name: it.name,
+      lat: it.lat,                                // Stage 4: needed for geographic
+      lng: it.lng,                                // leg ordering in balance_nchrp
+    })),
     unbalanced_volumes: { AM: stripVols('AM'), PM: stripVols('PM') },
     links: networkLinks,
-    mode: balancing.mode ?? 'conservative',       // Stage 3b: user-selectable via S5
-    max_iterations: balancing.maxIterations ?? 500,
-    tolerance: balancing.convergenceThreshold ?? 1e-6,
-    round_final: true,
+    link_resolution_method: balancing.linkResolution ?? 'larger',  // S5 setting
+    max_iterations: balancing.maxIterations ?? 100,
+    tolerance: 0.5,                                                // veh, per spec
   }
 }
 
@@ -132,7 +138,7 @@ export default function S6_RunAnalysis() {
     try {
       const links = getLinks()
       const payload = buildPayload(intersections, balancing, links)
-      const res = await fetch('/api/balance-network', {
+      const res = await fetch('/api/balance-nchrp', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -148,11 +154,13 @@ export default function S6_RunAnalysis() {
       applyBalancedRun(data.balanced)
       setLastRun({
         timestamp: new Date().toISOString(),
-        mode: data.mode,                                       // Stage 3a: 'furness'
-        chains: data.chains ?? [],                             // new per-chain shape
-        convergence: data.convergence,                         // back-compat shim
+        method: data.method,                            // 'larger' | 'average'
+        resolvedLinks: data.resolved_links ?? { AM: [], PM: [] },
+        iterations: data.iterations ?? { AM: {}, PM: {} },
+        intConverged: data.converged ?? { AM: {}, PM: {} },
         qcFlags: data.qc_flags ?? [],
-        adjustments: { AM: [], PM: [] },                       // not produced by new endpoint
+        // Stage 4 has no chains[] (algorithm is per-intersection, not chain-based)
+        chains: [],
       })
       setStatus('animating')
     } catch (err) {
@@ -199,7 +207,8 @@ export default function S6_RunAnalysis() {
           <div className="di-s6-cfg">
             <h3 className="di-s6-cfg__title">Configuration</h3>
             <div className="di-s6-cfg__grid">
-              <CfgRow k="Method"         v={(balancing.mode ?? 'conservative') === 'conservative' ? 'Conservative' : 'Furness'} />
+              <CfgRow k="Method"         v="NCHRP 255/765" />
+              <CfgRow k="Link resolution" v={(balancing.linkResolution ?? 'larger') === 'larger' ? 'Larger value' : 'Average'} />
               <CfgRow k="Direction"      v={balancing.corridorDir ?? '—'} />
               <CfgRow k="Peak mode"      v={balancing.peakMode === 'Independent' ? 'Independent' : 'Corridor (shared)'} />
               <CfgRow k="AM window"      v={`${balancing.amWindow?.start ?? '—'} – ${balancing.amWindow?.end ?? '—'}`} />
@@ -236,10 +245,10 @@ export default function S6_RunAnalysis() {
             </button>
             {!hasResults && status === 'idle' && (
               <span className="di-s6-run__hint">
-                {(balancing.mode ?? 'conservative') === 'conservative'
-                  ? 'Conservative balancing — floor at collected counts, excess flows into turning movements. Walks every link in the project network.'
-                  : 'Furness balancing — NCHRP 255 proportional averaging, may reduce volumes below collected counts.'}
-                {' '}Per-chain convergence shown below after the run.
+                Calls /api/balance-nchrp with real NCHRP 255/765 turning-movement
+                refinement. Each intersection gets independent Fratar factoring
+                against link-resolved targets; balanced volumes are floored at
+                raw and rounded up to the next 5.
               </span>
             )}
           </div>

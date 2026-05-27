@@ -32,6 +32,7 @@ from openpyxl.styles import Font, Alignment, PatternFill
 from count_agent import extract, MOVEMENTS
 from balancer import balance_network, network_qc_flags
 from balancer import balance_corridor, run_qc
+from balancer import balance_nchrp
 from line_diagram import render_single_diagram, VIEW_MODES, FIG_INCHES, DPI
 from excel_export import build_workbook
 
@@ -295,6 +296,146 @@ async def balance_endpoint(payload: dict):
             "PM": pm_adj,
         },
         "qc_flags": qc_flags,
+    }
+
+
+@app.post("/balance-nchrp", dependencies=[Depends(require_auth)])
+async def balance_nchrp_endpoint(payload: dict):
+    """Stage 4: real NCHRP 255/765 turning-movement refinement.
+
+    Replaces the cascade-prone link-by-link /balance-network solver. The
+    algorithm:
+      A) resolve_link_volumes — collapse adjacent intersection counts on the
+         same link into one volume per directed edge (larger or average)
+      B) Per-intersection 4×4 Fratar factoring against link-resolved and
+         raw-derived row/col targets
+      C) Floor — clamp balanced ≥ raw on every nonzero movement
+      D) Round up to next 5
+
+    Payload:
+      {
+        "intersections": [{"num": int, "name": str,
+                           "lat": float, "lng": float}, ...],  # lat/lng optional
+                                                               # (used to set
+                                                               # leg orientation)
+        "unbalanced_volumes": {"AM": {num_str: {mv: val}}, "PM": {...}},
+        "links": [{"fromNum", "toNum", "direction", "mode"}],
+        "link_resolution_method": "larger" | "average",   # default 'larger'
+        "tolerance": float,                               # default 0.5 (veh)
+        "max_iterations": int                             # per-int, default 100
+      }
+
+    Response (spec §9 + resolved_links for transparency):
+      {
+        "balanced": {"AM": {num_str: {mv: val}}, "PM": {...}},
+        "resolved_links": {
+            "AM": [{"fromNum","toNum","direction","volume"}, ...],
+            "PM": [...]
+        },
+        "iterations": {"AM": {num_str: int}, "PM": {num_str: int}},
+        "converged":  {"AM": {num_str: bool}, "PM": {num_str: bool}},
+        "qc_flags": [...],
+        "method": "larger" | "average",
+      }
+    """
+    intersections = payload.get("intersections")
+    if not isinstance(intersections, list) or not intersections:
+        raise HTTPException(status_code=400, detail="intersections must be a non-empty list")
+
+    coords = {}
+    for it in intersections:
+        if not isinstance(it, dict) or "num" not in it:
+            raise HTTPException(status_code=400, detail="each intersection needs a num field")
+        n = int(it["num"])
+        if "lat" in it and "lng" in it and it["lat"] is not None and it["lng"] is not None:
+            coords[n] = {"lat": float(it["lat"]), "lng": float(it["lng"])}
+
+    unbalanced = payload.get("unbalanced_volumes", {})
+    if not isinstance(unbalanced, dict):
+        raise HTTPException(status_code=400, detail="unbalanced_volumes must be a dict")
+
+    links_in = payload.get("links", [])
+    if not isinstance(links_in, list):
+        raise HTTPException(status_code=400, detail="links must be a list")
+
+    method = payload.get("link_resolution_method", "larger")
+    if method not in ("larger", "average"):
+        raise HTTPException(
+            status_code=400,
+            detail="link_resolution_method must be 'larger' or 'average'",
+        )
+
+    try:
+        tol = float(payload.get("tolerance", 0.5))
+        max_iter = int(payload.get("max_iterations", 100))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="tolerance/max_iterations must be numeric")
+
+    # Filter out mode='None' links per spec — they're not balanced
+    active_links = []
+    for L in links_in:
+        if not isinstance(L, dict):
+            raise HTTPException(status_code=400, detail="each link must be a dict")
+        if L.get("mode", "Full") == "None":
+            continue
+        active_links.append({
+            "fromNum": int(L["fromNum"]),
+            "toNum":   int(L["toNum"]),
+            "direction": L.get("direction"),
+            "mode":    L.get("mode", "Full"),
+        })
+
+    def _cast_period(period_vols):
+        out = {}
+        for n_str, mv_dict in (period_vols or {}).items():
+            n = int(n_str)
+            full = {k: 0.0 for k in ALL_MOVEMENTS}
+            for mv, val in (mv_dict or {}).items():
+                if mv in full and val is not None:
+                    full[mv] = float(val)
+            out[n] = full
+        return out
+
+    am_raw = _cast_period(unbalanced.get("AM", {}))
+    pm_raw = _cast_period(unbalanced.get("PM", {}))
+
+    am_result = balance_nchrp(am_raw, active_links, method=method, coords=coords,
+                              tol=tol, max_iter=max_iter)
+    pm_result = balance_nchrp(pm_raw, active_links, method=method, coords=coords,
+                              tol=tol, max_iter=max_iter)
+
+    def _serialize_resolved(resolved):
+        return [
+            {"fromNum": u, "toNum": d, "direction": dirn, "volume": v}
+            for (u, d, dirn), v in resolved.items()
+        ]
+
+    # Tag QC flags by period
+    qc_all = []
+    for f in am_result['qc_flags']:
+        qc_all.append({**f, 'period': 'AM'})
+    for f in pm_result['qc_flags']:
+        qc_all.append({**f, 'period': 'PM'})
+
+    return {
+        "balanced": {
+            "AM": {str(n): vols for n, vols in am_result['balanced'].items()},
+            "PM": {str(n): vols for n, vols in pm_result['balanced'].items()},
+        },
+        "resolved_links": {
+            "AM": _serialize_resolved(am_result['resolved_links']),
+            "PM": _serialize_resolved(pm_result['resolved_links']),
+        },
+        "iterations": {
+            "AM": {str(n): i for n, i in am_result['iterations'].items()},
+            "PM": {str(n): i for n, i in pm_result['iterations'].items()},
+        },
+        "converged": {
+            "AM": {str(n): c for n, c in am_result['converged'].items()},
+            "PM": {str(n): c for n, c in pm_result['converged'].items()},
+        },
+        "qc_flags": qc_all,
+        "method": method,
     }
 
 
