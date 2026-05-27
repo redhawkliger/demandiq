@@ -612,6 +612,9 @@ CELL_MOVEMENT = {
     (2, 0): 'EBR', (2, 1): 'EBL', (2, 2): None,  (2, 3): 'EBT',
     (3, 0): 'WBL', (3, 1): 'WBR', (3, 2): 'WBT', (3, 3): None,
 }
+# Inverse: movement code → (row, col). Useful for shared-cell detection in
+# Stage 4c.3 reconciliation.
+MOVEMENT_CELL = {mv: (r, c) for (r, c), mv in CELL_MOVEMENT.items() if mv is not None}
 LEG_INDEX  = {'S': 0, 'N': 1, 'W': 2, 'E': 3}    # leg name → row/col index
 LEG_IN_DIR  = {0: 'NB', 1: 'SB', 2: 'EB', 3: 'WB'}   # cars entering via leg
 LEG_OUT_DIR = {0: 'SB', 1: 'NB', 2: 'WB', 3: 'EB'}   # cars exiting via leg
@@ -827,6 +830,11 @@ def balance_leg_totals(
     link_methods = {}            # (link_id) → 'larger' | 'average' after feasibility check
 
     for L_idx, L in enumerate(links):
+        # Skip None-mode links from leg-total balancing entirely. They appear
+        # in the conservation table as informational but don't participate in
+        # Level 1 link-equality enforcement.
+        if L.get('mode', 'Full') == 'None':
+            continue
         a, b = int(L['fromNum']), int(L['toNum'])
         axis = L.get('direction')
         if axis == 'EB/WB':
@@ -1059,39 +1067,88 @@ def _round_up_5_nchrp(x, raw_x):
     return int(math.ceil(x / 5.0) * 5)
 
 
-def compute_link_conservation(balanced, resolved_links):
-    """For every directed link, compute upstream outflow vs downstream inflow
-    on the BALANCED matrix and the resulting delta.
+def _adjust_leg_to_target(balanced_int, ltr_keys, raw_int, target, shared_keys=None):
+    """Stage 4c.3 helper. Round each of the 3 L/T/R cells up to nearest 5
+    (raw==0 stays 0), then add/subtract 5 from cells until the leg's L+T+R
+    sum equals `target`.
 
-    Stage 4c.1: the real engineering question after balancing is "does
-    upstream outflow == downstream inflow on every link?" — NOT "what's the
-    internal IPF residual at each intersection." This function answers the
-    former.
+    Cell-selection priority: cells NOT in `shared_keys` are preferred — this
+    matters at corridor intersections where a cell (e.g. EBT) is in both a
+    linked col (one direction's outflow) AND a linked row (another link's
+    approach). Touching the shared cell breaks the other link's constraint;
+    touching a non-shared cell doesn't. Falls back to shared cells if
+    non-shared options are exhausted.
+
+    Cells stay non-negative multiples of 5. The raw>0⇒balanced≥5 invariant
+    applies to initial rounding but is relaxed during adjustment when link
+    conservation requires (rare; corridor-stub edge case).
+
+    Returns: target - final_sum.
+    """
+    import math
+    shared = set(shared_keys or [])
+    non_shared = [k for k in ltr_keys if k not in shared]
+    shared_in_leg = [k for k in ltr_keys if k in shared]
+
+    # Initial Step-D rounding (raw==0 stays 0; else ceil to next 5)
+    for k in ltr_keys:
+        if raw_int.get(k, 0) == 0:
+            balanced_int[k] = 0
+        else:
+            balanced_int[k] = int(math.ceil(balanced_int.get(k, 0) / 5.0) * 5)
+
+    for _ in range(1000):
+        cur_sum = sum(balanced_int.get(k, 0) for k in ltr_keys)
+        if cur_sum == target:
+            return 0
+
+        if cur_sum > target:
+            # Decrement: try non-shared first, then shared. Within each tier,
+            # pick the largest cell that's ≥ 5 (can drop by 5 without going
+            # negative).
+            for tier in (non_shared, shared_in_leg):
+                cands = sorted(
+                    [(balanced_int[k], k) for k in tier if balanced_int[k] >= 5],
+                    reverse=True,
+                )
+                if cands:
+                    balanced_int[cands[0][1]] -= 5
+                    break
+            else:
+                return target - cur_sum     # cannot shrink further
+        else:
+            # Increment: prefer non-shared, then shared. Within each tier,
+            # add 5 to the largest cell.
+            for tier in (non_shared, shared_in_leg):
+                if tier:
+                    largest_k = max(tier, key=lambda k: balanced_int.get(k, 0))
+                    balanced_int[largest_k] += 5
+                    break
+            else:
+                return target - cur_sum
+
+    return target - sum(balanced_int.get(k, 0) for k in ltr_keys)
+
+
+def compute_link_conservation(balanced, resolved_links, link_modes=None):
+    """For every directed link, compute upstream outflow vs downstream inflow
+    on the BALANCED matrix and the resulting delta. Each entry is tagged with
+    the link's mode ('Full' | 'Land Use' | 'None') if `link_modes` is provided.
 
     Args:
-        balanced:        { int_num: { movement: value } } (post-round-up-5)
-        resolved_links:  { (u, d, direction): float } — only used for the
-                         key set; resolved volumes are NOT compared (we want
-                         the actual conservation on the balanced result, not
-                         conformance to the link target).
+        balanced:        { int_num: { movement: value } }
+        resolved_links:  { (u, d, direction): float } — key set drives iteration
+        link_modes:      optional { (u, d, direction): 'Full'|'Land Use'|'None' }
 
     Returns:
-        [
-          {
-            'fromNum': int, 'toNum': int, 'direction': 'EB'|'WB'|'NB'|'SB',
-            'upstream_outflow': float, 'downstream_inflow': float, 'delta': float,
-          },
-          ...
-        ]
-    where delta = downstream_inflow - upstream_outflow. Zero = perfectly
-    conserved. Small nonzero values (≤ few veh) can come from round-up-to-5
-    on different sides of the link; that's expected and surfaced honestly.
+        list of dicts with keys: fromNum, toNum, direction, upstream_outflow,
+        downstream_inflow, delta, mode.
     """
+    link_modes = link_modes or {}
     out = []
     for (u, d, direction) in sorted(resolved_links.keys()):
         u_vols = balanced.get(u, {})
         d_vols = balanced.get(d, {})
-        # Outflow = through + 2 turns + U-turn (per DIRECTION_SPEC)
         spec = DIRECTION_SPEC[direction]
         outflow = sum(u_vols.get(k, 0) for k in spec['outflow']) + u_vols.get(spec['outflow_u'], 0)
         inflow  = sum(d_vols.get(k, 0) for k in spec['approach'])
@@ -1102,7 +1159,38 @@ def compute_link_conservation(balanced, resolved_links):
             'upstream_outflow': float(outflow),
             'downstream_inflow': float(inflow),
             'delta': float(inflow - outflow),
+            'mode': link_modes.get((u, d, direction), 'Full'),
         })
+    return out
+
+
+def _build_link_modes(links, coords=None):
+    """Build {(u, d, direction): mode} mapping from a link list. Mirrors the
+    geographic ordering used in resolve_link_volumes and _build_links_by_int."""
+    coords = coords or {}
+    out = {}
+    for L in links:
+        a, b = int(L['fromNum']), int(L['toNum'])
+        axis = L.get('direction')
+        mode = L.get('mode', 'Full')
+        if axis == 'EB/WB':
+            a_lng = coords.get(a, {}).get('lng')
+            b_lng = coords.get(b, {}).get('lng')
+            if a_lng is not None and b_lng is not None:
+                west, east = (a, b) if a_lng < b_lng else (b, a)
+            else:
+                west, east = (a, b) if a < b else (b, a)
+            out[(west, east, 'EB')] = mode
+            out[(east, west, 'WB')] = mode
+        elif axis == 'NB/SB':
+            a_lat = coords.get(a, {}).get('lat')
+            b_lat = coords.get(b, {}).get('lat')
+            if a_lat is not None and b_lat is not None:
+                south, north = (a, b) if a_lat < b_lat else (b, a)
+            else:
+                south, north = (a, b) if a < b else (b, a)
+            out[(south, north, 'NB')] = mode
+            out[(north, south, 'SB')] = mode
     return out
 
 
@@ -1269,32 +1357,144 @@ def balance_nchrp(
     # Step C (floor) intentionally removed — see docstring. Furness alone is
     # the algorithm; the floor was a post-processing override.
 
-    # Step D: round up to next 5
+    # ── Pre-round snapshot for canonical-link-volume computation ─────────
+    link_modes = _build_link_modes(links, coords=coords)
+    pre_round_lc = compute_link_conservation(balanced, resolved, link_modes)
+    canonical_by_link = {}
+    import math
+    for entry in pre_round_lc:
+        key = (entry['fromNum'], entry['toNum'], entry['direction'])
+        avg = (entry['upstream_outflow'] + entry['downstream_inflow']) / 2.0
+        canonical_by_link[key] = int(math.ceil(avg / 5.0) * 5)
+
+    # ── Step D: round up to next 5 (all cells) ──────────────────────────
     if round_to_5:
         for int_num, balanced_vols in balanced.items():
             raw = raw_volumes.get(int_num, {})
             for mv in list(balanced_vols.keys()):
                 balanced_vols[mv] = _round_up_5_nchrp(balanced_vols[mv], raw.get(mv))
 
-    # Stage 4c.2: compute link conservation on the ROUNDED balanced output.
-    # Two-level Furness gets pre-round deltas near zero EXCEPT at thin-matrix
-    # intersections (single-cell legs from structural zeros), which can leave
-    # 5-15 veh structural residuals that no leg-total IPF can eliminate.
-    # Round-up-to-5 adds another ~5 veh per side. Flag threshold of 10 veh
-    # surfaces engineering-meaningful discrepancies without flooding on
-    # structural artifacts.
+    # ── Stage 4c.3: post-round link reconciliation ──────────────────────
+    # For each Full directed link, force both endpoints' leg L+T+R sums to
+    # equal the canonical link volume (= round5(avg pre-round)). This makes
+    # link conservation hold EXACTLY for Full links post-round, modulo the
+    # rare case where _adjust_leg_to_target can't shrink due to raw-floor.
+    #
+    # Iterates because corridor intersections that are both downstream of
+    # one link AND upstream of another (in the SAME direction) have a
+    # shared cell (e.g. EBT at Int 2 sits in both the W-link approach row
+    # and the E-link outflow col). The outer loop damps the interference.
+    full_endpoints = {}    # (u, d, direction) → (u_leg_idx, d_leg_idx)
+    for (u, d, direction) in resolved.keys():
+        mode = link_modes.get((u, d, direction), 'Full')
+        if mode != 'Full':
+            continue
+        u_leg = next((leg for (nb, leg, _ax) in links_by_int.get(u, []) if nb == d), None)
+        d_leg = next((leg for (nb, leg, _ax) in links_by_int.get(d, []) if nb == u), None)
+        if u_leg is None or d_leg is None:
+            continue
+        full_endpoints[(u, d, direction)] = (LEG_INDEX[u_leg], LEG_INDEX[d_leg])
+
+    # Precompute which leg indices are linked at each intersection. A cell
+    # at (r, c) of intersection X is "shared" with another linked leg iff
+    # the OTHER axis index (the one NOT equal to the leg currently being
+    # reconciled) is in linked_legs[X]. Used by _adjust_leg_to_target's
+    # shared_keys arg.
+    linked_legs_at = {}    # int_num → set of leg indices that have any link
+    for int_num, entries in links_by_int.items():
+        linked_legs_at[int_num] = {LEG_INDEX[leg] for (_nb, leg, _ax) in entries}
+
+    def _shared_keys_outflow(int_num, ltr_keys, this_leg_idx):
+        """For outflow cells (all in col this_leg_idx), shared with another
+        linked row iff the cell's row index is also in linked_legs_at[int_num]."""
+        linked = linked_legs_at.get(int_num, set())
+        result = []
+        for k in ltr_keys:
+            r, _c = MOVEMENT_CELL.get(k, (None, None))
+            if r is not None and r != this_leg_idx and r in linked:
+                result.append(k)
+        return result
+
+    def _shared_keys_approach(int_num, ltr_keys, this_leg_idx):
+        """For approach cells (all in row this_leg_idx), shared with another
+        linked col iff the cell's col index is also linked."""
+        linked = linked_legs_at.get(int_num, set())
+        result = []
+        for k in ltr_keys:
+            _r, c = MOVEMENT_CELL.get(k, (None, None))
+            if c is not None and c != this_leg_idx and c in linked:
+                result.append(k)
+        return result
+
+    RECONCILE_MAX_OUTER = 500
+    if round_to_5 and full_endpoints:
+        for outer_it in range(RECONCILE_MAX_OUTER):
+            any_change = False
+            for (u, d, direction), (u_leg_idx, d_leg_idx) in full_endpoints.items():
+                canonical = canonical_by_link[(u, d, direction)]
+                spec = DIRECTION_SPEC[direction]
+
+                # Upstream: leg-col cells. Cells whose row is also a linked
+                # leg at u are "shared" — touching them perturbs that other
+                # linked leg's row sum. Prefer non-shared.
+                u_uturn = balanced[u].get(spec['outflow_u'], 0)
+                u_target = canonical - u_uturn
+                u_keys = spec['outflow']
+                u_shared = _shared_keys_outflow(u, u_keys, u_leg_idx)
+                u_sum_before = sum(balanced[u].get(k, 0) for k in u_keys)
+                _adjust_leg_to_target(balanced[u], u_keys, raw_volumes.get(u, {}),
+                                      u_target, shared_keys=u_shared)
+                if sum(balanced[u].get(k, 0) for k in u_keys) != u_sum_before:
+                    any_change = True
+
+                # Downstream: leg-row cells. Same shared-cell logic for cols.
+                d_target = canonical
+                d_keys = spec['approach']
+                d_shared = _shared_keys_approach(d, d_keys, d_leg_idx)
+                d_sum_before = sum(balanced[d].get(k, 0) for k in d_keys)
+                _adjust_leg_to_target(balanced[d], d_keys, raw_volumes.get(d, {}),
+                                      d_target, shared_keys=d_shared)
+                if sum(balanced[d].get(k, 0) for k in d_keys) != d_sum_before:
+                    any_change = True
+            if not any_change:
+                break
+
+    # ── Final link conservation (post-reconciliation) ───────────────────
+    link_conservation = compute_link_conservation(balanced, resolved, link_modes)
+
+    # Flag Full links that still violate conservation (rare — happens when
+    # _adjust_leg_to_target can't shrink due to raw-floor constraints).
     LINK_POST_ROUND_TOL = 10.0
-    link_conservation = compute_link_conservation(balanced, resolved)
     for entry in link_conservation:
-        if abs(entry['delta']) > LINK_POST_ROUND_TOL:
+        if entry.get('mode') != 'Full':
+            continue
+        if abs(entry['delta']) > 0.5:
             qc_flags.append({
                 'check': 'NCHRP-LINK-DELTA',
                 'int': entry['fromNum'],
                 'message': (
-                    f"Link {entry['fromNum']}→{entry['toNum']} {entry['direction']}: "
-                    f"delta {entry['delta']:+.1f} veh — "
-                    f"upstream outflow {entry['upstream_outflow']:.0f}, "
-                    f"downstream inflow {entry['downstream_inflow']:.0f}."
+                    f"Link {entry['fromNum']}→{entry['toNum']} {entry['direction']} "
+                    f"({entry['mode']}): delta {entry['delta']:+.1f} veh post-reconciliation "
+                    f"— upstream {entry['upstream_outflow']:.0f}, "
+                    f"downstream {entry['downstream_inflow']:.0f}. Likely a raw-floor "
+                    f"clipping issue on one of the leg's L/T/R cells."
+                ),
+            })
+
+    # NCHRP-LANDUSE-DELTA: report Land Use link deltas as informational
+    for entry in link_conservation:
+        if entry.get('mode') != 'Land Use':
+            continue
+        if abs(entry['delta']) > 0.5:
+            qc_flags.append({
+                'check': 'NCHRP-LANDUSE-DELTA',
+                'int': entry['fromNum'],
+                'message': (
+                    f"Link {entry['fromNum']}→{entry['toNum']} {entry['direction']} "
+                    f"(Land Use): downstream {entry['downstream_inflow']:.0f} − "
+                    f"upstream {entry['upstream_outflow']:.0f} = "
+                    f"{entry['delta']:+.0f} veh land-use delta (expected; counts are "
+                    f"intentionally not reconciled on this link)."
                 ),
             })
 

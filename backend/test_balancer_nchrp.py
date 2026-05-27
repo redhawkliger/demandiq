@@ -350,38 +350,30 @@ def test_link_conservation_holds():
               for a, b in [(1,2),(2,3),(3,4),(4,5),(5,7),(7,8),(8,9)]]
              + [{'fromNum': 5, 'toNum': 6, 'direction': 'NB/SB'}])
 
-    # Stage 4c.2: two-level Furness (NCHRP 255 §C.2 / NCHRP 765 ch. 6).
-    # Level 1 balances leg-total targets across the network so adjacent
-    # intersections agree on each link AND row_total == col_total at each
-    # intersection. Level 2 per-intersection IPF then hits exact targets,
-    # so link conservation holds (delta near zero) — EXCEPT at structurally
-    # thin matrix intersections, where a leg has only one non-zero cell
-    # (e.g. WB direction at a corridor intersection where NBL=SBR=0 means
-    # the W-leg col contains only WBT). At those legs the single cell must
-    # simultaneously satisfy its col target and its row target; if both came
-    # from different links, the residual is unavoidable. The test allows up
-    # to 20 veh post-round to accommodate this structural floor while still
-    # catching any algorithmic regression (the pre-Stage-4c.2 algorithm had
-    # max delta ~110 veh on Bodger).
-    POST_ROUND_TOL = 20.0
+    # Stage 4c.3: post-round link reconciliation enforces |delta| == 0 on Full
+    # links exactly (the canonical = round5(avg pre-round) is set as both
+    # leg sums via _adjust_leg_to_target). Land Use and None links are
+    # excluded from the assertion — Land Use intentionally allows a
+    # documented landuse_delta, None passes through without reconciliation.
     for method in ('larger', 'average'):
         result = balance_nchrp(raw, links, method=method, coords=coords)
         lc = result['link_conservation']
         assert isinstance(lc, list)
         assert len(lc) > 0
-        violations = [e for e in lc if abs(e['delta']) > POST_ROUND_TOL]
-        max_abs = max(abs(e['delta']) for e in lc)
+        full_links = [e for e in lc if e.get('mode') == 'Full']
+        landuse_links = [e for e in lc if e.get('mode') == 'Land Use']
+        none_links = [e for e in lc if e.get('mode') == 'None']
+        violations = [e for e in full_links if abs(e['delta']) > 0.5]
         if violations:
             for v in violations[:5]:
                 print(f"    VIOLATION {method}: {v['fromNum']}→{v['toNum']} {v['direction']}: "
                       f"out={v['upstream_outflow']:.1f} in={v['downstream_inflow']:.1f} "
                       f"delta={v['delta']:+.1f}")
         assert len(violations) == 0, \
-            f"{method}: {len(violations)} link(s) with |delta|>{POST_ROUND_TOL} veh"
-        # NCHRP-LINK-DELTA flags ARE expected at structurally-thin intersections;
-        # we just assert their magnitudes stay under POST_ROUND_TOL.
-        print(f"    {method}: max |delta| = {max_abs:.2f} veh (≤ {POST_ROUND_TOL} tol)")
-    print(f"  test_link_conservation_holds: PASS (two-level Furness; small structural residuals OK)")
+            f"{method}: {len(violations)} Full link(s) failed exact conservation"
+        print(f"    {method}: {len(full_links)} Full links — all delta==0 ✓ | "
+              f"{len(landuse_links)} Land Use | {len(none_links)} None")
+    print(f"  test_link_conservation_holds: PASS (post-round reconciliation enforces conservation)")
 
 
 if __name__ == '__main__':

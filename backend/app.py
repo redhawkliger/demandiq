@@ -371,13 +371,15 @@ async def balance_nchrp_endpoint(payload: dict):
     except (TypeError, ValueError):
         raise HTTPException(status_code=400, detail="tolerance/max_iterations must be numeric")
 
-    # Filter out mode='None' links per spec — they're not balanced
+    # Stage 4c.3: pass ALL links through (including mode='None') so they
+    # appear in the link_conservation output as informational. Filtering by
+    # mode happens internally in balance_nchrp (None skipped from leg-total
+    # balancing + reconciliation; Land Use balanced but not reconciled;
+    # Full balanced + reconciled to canonical).
     active_links = []
     for L in links_in:
         if not isinstance(L, dict):
             raise HTTPException(status_code=400, detail="each link must be a dict")
-        if L.get("mode", "Full") == "None":
-            continue
         active_links.append({
             "fromNum": int(L["fromNum"]),
             "toNum":   int(L["toNum"]),
