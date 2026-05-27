@@ -129,7 +129,10 @@ export default function S6_RunAnalysis() {
         resolvedLinks: data.resolved_links ?? { AM: [], PM: [] },
         iterations: data.iterations ?? { AM: {}, PM: {} },
         intConverged: data.converged ?? { AM: {}, PM: {} },
-        finalResidual: data.final_residual ?? { AM: {}, PM: {} },   // Stage 4c
+        // Stage 4c.1: link conservation is the engineer-facing correctness check.
+        // Intersection-internal residual still returned by the backend for
+        // debugging but no longer displayed.
+        linkConservation: data.link_conservation ?? { AM: [], PM: [] },
         qcFlags: data.qc_flags ?? [],
         // Stage 4 has no chains[] (algorithm is per-intersection, not chain-based)
         chains: [],
@@ -160,8 +163,8 @@ export default function S6_RunAnalysis() {
   const pmIters = lastRun?.iterations?.PM ?? {}
   const amConv  = lastRun?.intConverged?.AM ?? {}
   const pmConv  = lastRun?.intConverged?.PM ?? {}
-  const amResid = lastRun?.finalResidual?.AM ?? {}
-  const pmResid = lastRun?.finalResidual?.PM ?? {}
+  const amLinkConservation = lastRun?.linkConservation?.AM ?? []
+  const pmLinkConservation = lastRun?.linkConservation?.PM ?? []
   const maxIter = balancing.maxIterations ?? 500
 
   // Mode breakdown for the config card
@@ -238,9 +241,15 @@ export default function S6_RunAnalysis() {
               pmIters={pmIters}
               amConv={amConv}
               pmConv={pmConv}
-              amResid={amResid}
-              pmResid={pmResid}
               maxIter={maxIter}
+            />
+          )}
+
+          {/* Link conservation — the real engineering correctness signal */}
+          {hasResults && (amLinkConservation.length > 0 || pmLinkConservation.length > 0) && (
+            <LinkConservationTable
+              am={amLinkConservation}
+              pm={pmLinkConservation}
             />
           )}
         </div>
@@ -274,21 +283,14 @@ function CfgRow({ k, v }) {
   )
 }
 
-// ── Per-intersection convergence list (Stage 4c NCHRP IPF) ──────────────
-// IPF convergence test = matrix stability (max cell delta between
-// iterations < tol). When row_total != col_total, IPF still stabilizes but
-// leaves a final_residual that quantifies the irreducible imbalance — that's
-// the engineer's signal of count-collection inconsistency at that node.
-//
-// Display logic per state:
-//   converged + residual < 0.5  → "converged in N iter"        (green dot)
-//   converged + residual >= 0.5 → "balanced — N iter, R veh residual"  (amber dot)
-//   not converged               → "did NOT stabilize in N iter"  (red dot — rare with IPF)
+// ── Per-intersection convergence list (Stage 4c.1 NCHRP IPF) ────────────
+// Just shows iter count + converged status. Internal IPF residual is no
+// longer surfaced — the real correctness signal is link conservation,
+// shown in LinkConservationTable below.
 function IntersectionConvergenceList({
   intersections,
   amIters, pmIters,
   amConv, pmConv,
-  amResid, pmResid,
   maxIter,
 }) {
   const sorted = [...intersections].sort((a, b) => a.num - b.num)
@@ -296,23 +298,13 @@ function IntersectionConvergenceList({
   const amOk = sorted.filter((it) => amConv[String(it.num)]).length
   const pmOk = sorted.filter((it) => pmConv[String(it.num)]).length
 
-  const renderStatus = (period, iters, converged, residual) => {
+  const renderStatus = (period, iters, converged) => {
     if (!converged) {
       return (
         <>
           <span className="di-s6-conv__dot di-s6-conv__dot--fail" />
           <span className="di-s6-conv__detail">
             {period}: did NOT stabilize in {iters} iter (max iter reached)
-          </span>
-        </>
-      )
-    }
-    if (residual >= 0.5) {
-      return (
-        <>
-          <span className="di-s6-conv__dot di-s6-conv__dot--warn" />
-          <span className="di-s6-conv__detail">
-            {period}: balanced — {iters} iter, {residual.toFixed(1)} veh residual
           </span>
         </>
       )
@@ -343,22 +335,85 @@ function IntersectionConvergenceList({
                 <span className="di-s6-conv__label">{it.name}</span>
               </div>
               <div className="di-s6-conv__cell">
-                {renderStatus('AM', amIters[n] ?? 0, !!amConv[n], amResid[n] ?? 0)}
+                {renderStatus('AM', amIters[n] ?? 0, !!amConv[n])}
               </div>
               <div className="di-s6-conv__cell">
-                {renderStatus('PM', pmIters[n] ?? 0, !!pmConv[n], pmResid[n] ?? 0)}
+                {renderStatus('PM', pmIters[n] ?? 0, !!pmConv[n])}
               </div>
             </div>
           )
         })}
       </div>
-      <div className="di-s6-conv__hint">
-        Residual &gt; 0.5 veh indicates raw-count inconsistency at that intersection.
-        IPF found the closest balanced matrix; the residual is the math telling you
-        the entry and exit counts don&apos;t fully agree. Review the NCHRP-RESIDUAL
-        flags for the imbalance percentage; consider re-counting if residual is
-        large (&gt; 20 veh).
+    </div>
+  )
+}
+
+// ── Link conservation table (Stage 4c.1) ───────────────────────────────
+// For every directed link, show upstream outflow vs downstream inflow on
+// the balanced matrix. Delta should be near zero. Engineering correctness
+// signal — non-zero deltas indicate the algorithm couldn't fully reconcile
+// adjacent counts.
+function LinkConservationTable({ am, pm }) {
+  const [period, setPeriod] = useState('AM')
+  const rows = period === 'AM' ? am : pm
+  const violations = rows.filter((r) => Math.abs(r.delta) > 0.5).length
+  const total = rows.length
+
+  return (
+    <div className="di-s6-lc">
+      <div className="di-s6-lc__head">
+        <h3 className="di-s6-lc__title">Link conservation</h3>
+        <div className="di-s6-lc__controls">
+          <span className="di-s6-lc__summary">
+            {violations === 0
+              ? `${total} links · all balanced ✓`
+              : `${total - violations}/${total} balanced · ${violations} with delta > 0.5 veh`}
+          </span>
+          <div className="di-s6-lc__period-toggle">
+            <button
+              type="button"
+              className={`di-s6-lc__period-btn${period === 'AM' ? ' di-s6-lc__period-btn--on' : ''}`}
+              onClick={() => setPeriod('AM')}
+            >AM</button>
+            <button
+              type="button"
+              className={`di-s6-lc__period-btn${period === 'PM' ? ' di-s6-lc__period-btn--on' : ''}`}
+              onClick={() => setPeriod('PM')}
+            >PM</button>
+          </div>
+        </div>
       </div>
+      <table className="di-s6-lc__table">
+        <thead>
+          <tr>
+            <th>Link</th>
+            <th>Dir</th>
+            <th style={{ textAlign: 'right' }}>Upstream outflow</th>
+            <th style={{ textAlign: 'right' }}>Downstream inflow</th>
+            <th style={{ textAlign: 'right' }}>Delta</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r, i) => {
+            const ok = Math.abs(r.delta) <= 0.5
+            return (
+              <tr key={i} className={ok ? '' : 'di-s6-lc__row--warn'}>
+                <td>{r.fromNum} → {r.toNum}</td>
+                <td>{r.direction}</td>
+                <td style={{ textAlign: 'right' }}>{r.upstream_outflow.toFixed(0)}</td>
+                <td style={{ textAlign: 'right' }}>{r.downstream_inflow.toFixed(0)}</td>
+                <td
+                  style={{ textAlign: 'right' }}
+                  className={ok ? 'di-s6-lc__delta--ok' : 'di-s6-lc__delta--warn'}
+                >
+                  {r.delta > 0 ? '+' : ''}{r.delta.toFixed(1)}
+                  {ok ? ' ✓' : ''}
+                </td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
     </div>
   )
 }
@@ -371,7 +426,7 @@ function ResultsPanel({ lastRun, intersections }) {
   const amOk = intersections.filter((it) => amConv[String(it.num)]).length
   const pmOk = intersections.filter((it) => pmConv[String(it.num)]).length
 
-  const residualFlags = qcFlags.filter((f) => f.check === 'NCHRP-RESIDUAL')
+  const linkDeltaFlags = qcFlags.filter((f) => f.check === 'NCHRP-LINK-DELTA')
 
   return (
     <div className="di-s6__right">
@@ -421,13 +476,12 @@ function ResultsPanel({ lastRun, intersections }) {
         )}
       </Collapsible>
 
-      {residualFlags.length > 0 && (
+      {linkDeltaFlags.length > 0 && (
         <div className="di-s6-qc__note">
-          {residualFlags.length} intersection{residualFlags.length === 1 ? '' : 's'} balanced with
-          a non-zero residual. IPF reached a stable matrix at each, but the row and
-          column count totals couldn&apos;t fully agree — a signal of inconsistent
-          counts (different survey days, partial coverage, etc), not an algorithm
-          error. See each NCHRP-RESIDUAL flag for the per-intersection imbalance %.
+          {linkDeltaFlags.length} link{linkDeltaFlags.length === 1 ? '' : 's'} ended balancing
+          with non-zero conservation delta (upstream outflow ≠ downstream inflow). See the
+          Link conservation table for the per-link breakdown; flagged rows show the gap that
+          IPF could not fully reconcile. This should be near-zero in a healthy run.
         </div>
       )}
     </div>

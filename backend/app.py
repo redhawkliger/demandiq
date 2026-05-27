@@ -438,6 +438,10 @@ async def balance_nchrp_endpoint(payload: dict):
             "AM": {str(n): r for n, r in am_result['final_residual'].items()},
             "PM": {str(n): r for n, r in pm_result['final_residual'].items()},
         },
+        "link_conservation": {
+            "AM": am_result['link_conservation'],
+            "PM": pm_result['link_conservation'],
+        },
         "qc_flags": qc_all,
         "method": method,
     }
