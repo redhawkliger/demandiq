@@ -764,6 +764,180 @@ def intersection_targets(int_num, raw_volumes, links_by_int, resolved_links):
     return row_targets, col_targets, present
 
 
+def balance_leg_totals(
+    raw_volumes,
+    links,
+    method='larger',
+    coords=None,
+    max_outer=500,
+    tol=1e-7,
+):
+    """STEP B Level 1 — Network-level leg-total balancing (NCHRP 255 §C.2,
+    NCHRP 765 ch. 6). Alternates two projections until the targets are
+    network-consistent:
+
+      (1) LINK EQUALITY — for every directed link (u → d) in direction `dir`,
+          set col_t[u][u_leg] = row_t[d][d_leg] = larger_or_avg(both sides).
+          After this step, adjacent intersections agree on each link.
+
+      (2) INTERSECTION CONSERVATION — at each intersection X, scale row + col
+          targets to their geometric mean (target = sqrt(row_sum × col_sum)).
+          Symmetric / minimum-perturbation. Ensures row_total == col_total at
+          each intersection so Level 2 per-intersection IPF can hit both
+          target sets exactly.
+
+    After convergence, level-2 per-intersection IPF with these targets
+    converges to exact match → link conservation holds across the network
+    automatically (delta < tol pre-rounding).
+
+    Returns:
+        (row_t, col_t, present_t, outer_iters, converged, qc_flags)
+        row_t / col_t: { int_num: [s, n, w, e] target lists }  (leg-indexed)
+        present_t:     { int_num: [bool, bool, bool, bool] }   (leg-present mask)
+        qc_flags:      NCHRP-LINK-INFEASIBLE entries (when Larger was forced
+                       to fall back to Average on a specific link)
+    """
+    import math
+    coords = coords or {}
+    qc_flags = []
+
+    # Initialize row + col targets from raw leg sums
+    row_t = {}
+    col_t = {}
+    present_t = {}
+    for int_num, int_vols in raw_volumes.items():
+        rt = [0.0] * 4
+        ct = [0.0] * 4
+        pres = [False] * 4
+        for leg, idx in LEG_INDEX.items():
+            in_dir  = LEG_IN_DIR[idx]
+            out_dir = LEG_OUT_DIR[idx]
+            rt[idx] = float(sum(int_vols.get(k, 0) for k in DIRECTION_SPEC[in_dir]['approach']))
+            ct[idx] = float(sum(int_vols.get(k, 0) for k in DIRECTION_SPEC[out_dir]['outflow']))
+            pres[idx] = (rt[idx] > 0) or (ct[idx] > 0)
+        row_t[int_num] = rt
+        col_t[int_num] = ct
+        present_t[int_num] = pres
+
+    # Build link endpoint list with geographic ordering. Each EB/WB link
+    # produces TWO directed entries (one EB, one WB); each NB/SB produces
+    # one NB and one SB. Per-link method override possible via feasibility
+    # check below.
+    link_directed = []           # list of (u, u_leg_idx, d, d_leg_idx, direction_code, method_override)
+    link_methods = {}            # (link_id) → 'larger' | 'average' after feasibility check
+
+    for L_idx, L in enumerate(links):
+        a, b = int(L['fromNum']), int(L['toNum'])
+        axis = L.get('direction')
+        if axis == 'EB/WB':
+            a_lng = coords.get(a, {}).get('lng')
+            b_lng = coords.get(b, {}).get('lng')
+            if a_lng is not None and b_lng is not None:
+                west, east = (a, b) if a_lng < b_lng else (b, a)
+            else:
+                west, east = (a, b) if a < b else (b, a)
+            link_directed.append((west, LEG_INDEX['E'], east, LEG_INDEX['W'], 'EB', L_idx))
+            link_directed.append((east, LEG_INDEX['W'], west, LEG_INDEX['E'], 'WB', L_idx))
+        elif axis == 'NB/SB':
+            a_lat = coords.get(a, {}).get('lat')
+            b_lat = coords.get(b, {}).get('lat')
+            if a_lat is not None and b_lat is not None:
+                south, north = (a, b) if a_lat < b_lat else (b, a)
+            else:
+                south, north = (a, b) if a < b else (b, a)
+            link_directed.append((south, LEG_INDEX['N'], north, LEG_INDEX['S'], 'NB', L_idx))
+            link_directed.append((north, LEG_INDEX['S'], south, LEG_INDEX['N'], 'SB', L_idx))
+        # Mark linked legs as present even if raw was 0
+        for u, u_leg, d, d_leg, _dir, _idx in link_directed[-2:]:
+            present_t[u][u_leg] = True
+            present_t[d][d_leg] = True
+
+    # ── Feasibility check: per directed edge, would Larger blow up at either
+    # endpoint? If so, fall back to Average for that link and emit flag.
+    # Threshold 0.95: a single linked leg can't legitimately exceed 95% of an
+    # intersection's outflow total or the math has no room for other legs.
+    method_per_directed = {}
+    for (u, u_leg, d, d_leg, direction, link_idx) in link_directed:
+        u_col_raw = col_t[u][u_leg]
+        d_row_raw = row_t[d][d_leg]
+        larger_val = max(u_col_raw, d_row_raw)
+        u_col_total = sum(col_t[u])
+        d_row_total = sum(row_t[d])
+        infeasible_u = u_col_total > 0 and larger_val > u_col_total * 0.95
+        infeasible_d = d_row_total > 0 and larger_val > d_row_total * 0.95
+        if method == 'larger' and (infeasible_u or infeasible_d):
+            method_per_directed[(u, d, direction)] = 'average'
+            qc_flags.append({
+                'check': 'NCHRP-LINK-INFEASIBLE',
+                'int': u,
+                'message': (
+                    f"Link {u}→{d} {direction}: Larger resolution ({larger_val:.0f}) "
+                    f"exceeds 95% of "
+                    + ('upstream' if infeasible_u else 'downstream')
+                    + " col/row total — falling back to Average for this link."
+                ),
+            })
+        else:
+            method_per_directed[(u, d, direction)] = method
+
+    # ── Phase 0: ONE-SHOT initial link resolution per the chosen method.
+    # The user-facing Larger/Average toggle determines the BIAS of the initial
+    # link target (max vs mean of the two adjacent raw counts). After this,
+    # the iterative link-equality step always averages — using max() in the
+    # loop ratchets the linked targets up monotonically against the
+    # geometric-mean conservation step, so it never converges under Larger.
+    for (u, u_leg, d, d_leg, direction, _idx) in link_directed:
+        m = method_per_directed[(u, d, direction)]
+        v_u = col_t[u][u_leg]
+        v_d = row_t[d][d_leg]
+        v_init = max(v_u, v_d) if m == 'larger' else (v_u + v_d) / 2.0
+        col_t[u][u_leg] = v_init
+        row_t[d][d_leg] = v_init
+
+    # ── Alternating projection outer loop
+    converged = False
+    outer_iters = 0
+    for outer_it in range(max_outer):
+        snap_row = {k: list(v) for k, v in row_t.items()}
+        snap_col = {k: list(v) for k, v in col_t.items()}
+
+        # (1) Link equality — always average to ensure convergence. The initial
+        # Larger/Average bias was applied in Phase 0 above.
+        for (u, u_leg, d, d_leg, direction, _idx) in link_directed:
+            v_u = col_t[u][u_leg]
+            v_d = row_t[d][d_leg]
+            new = (v_u + v_d) / 2.0
+            col_t[u][u_leg] = new
+            row_t[d][d_leg] = new
+
+        # (2) Intersection conservation — geometric-mean scaling per int
+        for int_num in row_t:
+            row_sum = sum(row_t[int_num])
+            col_sum = sum(col_t[int_num])
+            if row_sum <= 0 or col_sum <= 0:
+                continue
+            target_total = math.sqrt(row_sum * col_sum)
+            rf = target_total / row_sum
+            cf = target_total / col_sum
+            for i in range(4):
+                row_t[int_num][i] *= rf
+                col_t[int_num][i] *= cf
+
+        # Convergence check
+        max_change = 0.0
+        for int_num in row_t:
+            for i in range(4):
+                max_change = max(max_change, abs(row_t[int_num][i] - snap_row[int_num][i]))
+                max_change = max(max_change, abs(col_t[int_num][i] - snap_col[int_num][i]))
+
+        outer_iters = outer_it + 1
+        if max_change < tol:
+            converged = True
+            break
+
+    return row_t, col_t, present_t, outer_iters, converged, qc_flags
+
+
 def furness_intersection(matrix, row_targets, col_targets, present, tol=0.5, max_iter=500):
     """STEP B — true biproportional iterative fitting (IPF / RAS / Sinkhorn).
 
@@ -999,41 +1173,51 @@ def balance_nchrp(
     resolved = resolve_link_volumes(raw_volumes, links, method=method, coords=coords)
     links_by_int = _build_links_by_int(links, coords=coords)
 
-    # Step B: per-intersection IPF.
+    # ── Step B Level 1: balance_leg_totals (network leg-total reconciliation)
+    # Produces row/col targets that are simultaneously link-consistent and
+    # intersection-conserving, so Level 2 per-int IPF hits exact targets and
+    # link conservation holds across the network.
+    row_targets_per_int, col_targets_per_int, presents, level1_iters, level1_conv, level1_flags = (
+        balance_leg_totals(raw_volumes, links, method=method, coords=coords, max_outer=500, tol=1e-7)
+    )
     balanced = {}
     iterations = {}
     converged_map = {}
     final_residual_map = {}
-    qc_flags = []
+    qc_flags = list(level1_flags)             # carry NCHRP-LINK-INFEASIBLE through
 
-    # Initialize matrices + targets + leg-index lookups for all intersections
+    # Pass-through intersections (no present legs) — typically intersections
+    # with no volumes and no links. Skip Level 2.
     matrices = {}
-    presents = {}
-    row_targets_per_int = {}
-    col_targets_per_int = {}
-    skip_set = set()                            # int_nums that pass through unchanged
-
+    skip_set = set()
     for int_num, int_vols in raw_volumes.items():
-        row_targets, col_targets, present = intersection_targets(
-            int_num, raw_volumes, links_by_int, resolved
-        )
-        if not any(present):
+        if not any(presents[int_num]):
             balanced[int_num] = dict(int_vols)
             iterations[int_num] = 0
             converged_map[int_num] = True
             final_residual_map[int_num] = 0.0
             skip_set.add(int_num)
             continue
-
         matrices[int_num] = _build_matrix(int_vols)
-        presents[int_num] = present
-        row_targets_per_int[int_num] = row_targets
-        col_targets_per_int[int_num] = col_targets
         iterations[int_num] = 0
         converged_map[int_num] = False
         final_residual_map[int_num] = 0.0
 
-    # Per-intersection IPF only. Link-enforcement post-processing was tried
+    if not level1_conv:
+        qc_flags.append({
+            'check': 'NCHRP-LEVEL1',
+            'int': 0,
+            'message': (
+                f"Level 1 (balance_leg_totals) did not converge in 500 outer iterations. "
+                f"Final per-intersection IPF targets may not be link-consistent."
+            ),
+        })
+
+    # ── Step B Level 2: per-intersection IPF against the reconciled targets.
+    # Use a tight tolerance — Level 1 already balanced row/col totals, so IPF
+    # should converge to exact targets except at thin-matrix intersections
+    # (single-cell columns/rows from structural zeros) where structural
+    # infeasibility leaves a small residual (typically a few veh). Link-enforcement post-processing was tried
     # (both as a nested outer loop and as a single-pass fixup) and found to
     # be mathematically intractable when raw counts have row/col-total
     # imbalance at one or more intersections — see balancer.py git history
@@ -1046,9 +1230,13 @@ def balance_nchrp(
     # via compute_link_conservation; engineers see exactly where adjacent
     # counts disagree.
     for int_num, M in matrices.items():
+        # Use 0.01 veh tolerance — far tighter than the default 0.5 — because
+        # Level 1 already gave us balanced targets. The only sources of
+        # non-zero residual are (a) IPF cell-stability tolerance and
+        # (b) structural infeasibility from thin matrices.
         M_out, conv, iters_used, final_residual = furness_intersection(
             M, row_targets_per_int[int_num], col_targets_per_int[int_num],
-            presents[int_num], tol=tol, max_iter=max_iter,
+            presents[int_num], tol=0.01, max_iter=max(max_iter, 2000),
         )
         matrices[int_num] = M_out
         iterations[int_num] = iters_used
@@ -1088,13 +1276,14 @@ def balance_nchrp(
             for mv in list(balanced_vols.keys()):
                 balanced_vols[mv] = _round_up_5_nchrp(balanced_vols[mv], raw.get(mv))
 
-    # Stage 4c.1: compute link conservation on the ROUNDED balanced output.
-    # The OUTER link-enforcement loop above gets pre-round deltas < tol (0.5 veh).
-    # Round-up-to-5 then introduces small noise: each L+T+R sum can grow by up
-    # to ~5 veh as cells round up independently. So we flag at a slightly
-    # relaxed tolerance (5 veh) — anything larger is a real algorithm issue,
-    # smaller is expected rounding artifact.
-    LINK_POST_ROUND_TOL = 5.0
+    # Stage 4c.2: compute link conservation on the ROUNDED balanced output.
+    # Two-level Furness gets pre-round deltas near zero EXCEPT at thin-matrix
+    # intersections (single-cell legs from structural zeros), which can leave
+    # 5-15 veh structural residuals that no leg-total IPF can eliminate.
+    # Round-up-to-5 adds another ~5 veh per side. Flag threshold of 10 veh
+    # surfaces engineering-meaningful discrepancies without flooding on
+    # structural artifacts.
+    LINK_POST_ROUND_TOL = 10.0
     link_conservation = compute_link_conservation(balanced, resolved)
     for entry in link_conservation:
         if abs(entry['delta']) > LINK_POST_ROUND_TOL:

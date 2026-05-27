@@ -350,25 +350,38 @@ def test_link_conservation_holds():
               for a, b in [(1,2),(2,3),(3,4),(4,5),(5,7),(7,8),(8,9)]]
              + [{'fromNum': 5, 'toNum': 6, 'direction': 'NB/SB'}])
 
-    # SOFT-PASS: this test documents that link conservation is NOT
-    # guaranteed by pure IPF on imbalanced raw counts. Two algorithm attempts
-    # (nested outer loop, single-pass link enforcement) were tried and shown
-    # to be mathematically intractable — see balancer.py git history
-    # 2026-05-27/28. The link_conservation field is still computed and shown
-    # in the S6 table as an engineer-facing data-quality signal, but exact
-    # conservation requires either re-introducing target normalization
-    # (Stage 4b approach, biases link targets) or a global multi-block IPF
-    # algorithm (not implemented). The test reports violations for visibility
-    # rather than hard-failing.
+    # Stage 4c.2: two-level Furness (NCHRP 255 §C.2 / NCHRP 765 ch. 6).
+    # Level 1 balances leg-total targets across the network so adjacent
+    # intersections agree on each link AND row_total == col_total at each
+    # intersection. Level 2 per-intersection IPF then hits exact targets,
+    # so link conservation holds (delta near zero) — EXCEPT at structurally
+    # thin matrix intersections, where a leg has only one non-zero cell
+    # (e.g. WB direction at a corridor intersection where NBL=SBR=0 means
+    # the W-leg col contains only WBT). At those legs the single cell must
+    # simultaneously satisfy its col target and its row target; if both came
+    # from different links, the residual is unavoidable. The test allows up
+    # to 20 veh post-round to accommodate this structural floor while still
+    # catching any algorithmic regression (the pre-Stage-4c.2 algorithm had
+    # max delta ~110 veh on Bodger).
+    POST_ROUND_TOL = 20.0
     for method in ('larger', 'average'):
         result = balance_nchrp(raw, links, method=method, coords=coords)
         lc = result['link_conservation']
-        assert isinstance(lc, list), f"link_conservation should be a list; got {type(lc)}"
-        assert len(lc) > 0, "expected link_conservation entries"
-        violations = [e for e in lc if abs(e['delta']) > 5.0]
+        assert isinstance(lc, list)
+        assert len(lc) > 0
+        violations = [e for e in lc if abs(e['delta']) > POST_ROUND_TOL]
         max_abs = max(abs(e['delta']) for e in lc)
-        print(f"    {method}: {len(violations)}/{len(lc)} links with |delta|>5 veh; max abs={max_abs:.1f}")
-    print(f"  test_link_conservation_holds: SOFT-PASS (link conservation not enforced; reported)")
+        if violations:
+            for v in violations[:5]:
+                print(f"    VIOLATION {method}: {v['fromNum']}→{v['toNum']} {v['direction']}: "
+                      f"out={v['upstream_outflow']:.1f} in={v['downstream_inflow']:.1f} "
+                      f"delta={v['delta']:+.1f}")
+        assert len(violations) == 0, \
+            f"{method}: {len(violations)} link(s) with |delta|>{POST_ROUND_TOL} veh"
+        # NCHRP-LINK-DELTA flags ARE expected at structurally-thin intersections;
+        # we just assert their magnitudes stay under POST_ROUND_TOL.
+        print(f"    {method}: max |delta| = {max_abs:.2f} veh (≤ {POST_ROUND_TOL} tol)")
+    print(f"  test_link_conservation_holds: PASS (two-level Furness; small structural residuals OK)")
 
 
 if __name__ == '__main__':
