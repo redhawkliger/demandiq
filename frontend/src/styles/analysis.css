@@ -110,6 +110,100 @@
   gap: 12px;
   margin-bottom: 18px;
 }
+/* ── Stage 4: per-intersection convergence list ──────────────────────── */
+.di-s6-conv {
+  margin-top: 18px;
+  padding: 14px 16px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+.di-s6-conv__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+.di-s6-conv__title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+.di-s6-conv__summary {
+  font-size: 11px;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+.di-s6-conv__list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.di-s6-conv__row {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr 1fr;
+  gap: 12px;
+  align-items: center;
+  padding: 8px 10px;
+  background: var(--bg-base);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.di-s6-conv__name { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.di-s6-conv__num {
+  font-size: 11px;
+  font-weight: 700;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  color: var(--text-primary);
+}
+.di-s6-conv__label {
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.di-s6-conv__cell { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.di-s6-conv__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.di-s6-conv__dot--ok   { background: #34D399; }
+.di-s6-conv__dot--warn { background: #FFB627; }
+.di-s6-conv__detail {
+  font-size: 11px;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.di-s6-conv__hint {
+  margin-top: 10px;
+  padding: 8px 10px;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  background: rgba(255, 182, 39, 0.06);
+  border-left: 2px solid #FFB627;
+  border-radius: 4px;
+  line-height: 1.45;
+}
+
+.di-s6-qc__note {
+  margin-top: 10px;
+  padding: 8px 12px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  line-height: 1.45;
+}
+
 /* ── Stage 3a: per-chain summary ─────────────────────────────────────── */
 .di-s6-chains {
   margin-top: 18px;

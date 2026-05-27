@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Loader2, Check, AlertTriangle, ArrowUp, ArrowDown } from 'lucide-react'
+import { Loader2, Check } from 'lucide-react'
 
 import {
   subscribe,
@@ -9,14 +9,11 @@ import {
   applyBalancedRun,
   setLastRun,
 } from '../store/projectStore'
-import ConvergenceChart from '../components/ConvergenceChart'
 
 import '../styles/forms.css'
 import '../styles/map.css'         // .di-banner, .di-btn-primary
 import '../styles/balancing.css'   // segmented/toggle styles aren't used, but harmless
 import '../styles/analysis.css'
-
-const TICK_MS = 40
 
 function hasAnyVolumes(intersections) {
   for (const it of intersections) {
@@ -82,8 +79,6 @@ function buildPayload(intersections, balancing, links) {
   }
 }
 
-const fmtPct = (v) => `${(v * 100).toFixed(2)}%`
-
 export default function S6_RunAnalysis() {
   const navigate = useNavigate()
   const snap = useSyncExternalStore(subscribe, getSnapshot, () => ({}))
@@ -100,41 +95,17 @@ export default function S6_RunAnalysis() {
     return () => clearTimeout(t)
   }, [needsConfig, navigate])
 
-  // ── Run / animation state ───────────────────────────────────────────
-  // 'idle' | 'fetching' | 'animating' | 'done' | 'error'
-  const [status, setStatus]   = useState(lastRun ? 'done' : 'idle')
-  const [error, setError]     = useState(null)
-  const [amIter, setAmIter]   = useState(lastRun ? lastRun.convergence?.AM?.log?.length ?? 0 : 0)
-  const [pmIter, setPmIter]   = useState(lastRun ? lastRun.convergence?.PM?.log?.length ?? 0 : 0)
-
-  // Animation: tick both periods in parallel until both reach their final iter
-  useEffect(() => {
-    if (status !== 'animating') return
-    const amLen = lastRun?.convergence?.AM?.log?.length ?? 0
-    const pmLen = lastRun?.convergence?.PM?.log?.length ?? 0
-    const total = Math.max(amLen, pmLen)
-    if (total === 0) {
-      setStatus('done')
-      return
-    }
-    let i = 0
-    const id = setInterval(() => {
-      i += 1
-      setAmIter(Math.min(i, amLen))
-      setPmIter(Math.min(i, pmLen))
-      if (i >= total) {
-        clearInterval(id)
-        setStatus('done')
-      }
-    }, TICK_MS)
-    return () => clearInterval(id)
-  }, [status, lastRun])
+  // ── Run state ─────────────────────────────────────────────────────────
+  // 'idle' | 'fetching' | 'done' | 'error'
+  // Stage 4 NCHRP balances per-intersection so there's no global "iterate
+  // animation" anymore — just show the final stats once /api/balance-nchrp
+  // returns. The TICK_MS / amIter / pmIter machinery is gone.
+  const [status, setStatus] = useState(lastRun ? 'done' : 'idle')
+  const [error, setError]   = useState(null)
 
   const handleRun = async () => {
     setStatus('fetching')
     setError(null)
-    setAmIter(0)
-    setPmIter(0)
     try {
       const links = getLinks()
       const payload = buildPayload(intersections, balancing, links)
@@ -162,7 +133,7 @@ export default function S6_RunAnalysis() {
         // Stage 4 has no chains[] (algorithm is per-intersection, not chain-based)
         chains: [],
       })
-      setStatus('animating')
+      setStatus('done')
     } catch (err) {
       setError(`${err.message}. If the backend is down, restart: cd backend && python3.12 app.py`)
       setStatus('error')
@@ -181,12 +152,14 @@ export default function S6_RunAnalysis() {
   }
 
   const hasResults = lastRun !== null
-  const isRunning  = status === 'fetching' || status === 'animating'
+  const isRunning  = status === 'fetching'
 
-  // ── Pulled out for readability ──────────────────────────────────────
-  const threshold = balancing.convergenceThreshold ?? 0.01
-  const amLog = lastRun?.convergence?.AM?.log ?? []
-  const pmLog = lastRun?.convergence?.PM?.log ?? []
+  // Per-intersection stats from the new endpoint
+  const amIters = lastRun?.iterations?.AM ?? {}
+  const pmIters = lastRun?.iterations?.PM ?? {}
+  const amConv  = lastRun?.intConverged?.AM ?? {}
+  const pmConv  = lastRun?.intConverged?.PM ?? {}
+  const maxIter = balancing.maxIterations ?? 100
 
   // Mode breakdown for the config card
   const linkModes = balancing.linkBalanceModes ?? {}
@@ -213,8 +186,8 @@ export default function S6_RunAnalysis() {
               <CfgRow k="Peak mode"      v={balancing.peakMode === 'Independent' ? 'Independent' : 'Corridor (shared)'} />
               <CfgRow k="AM window"      v={`${balancing.amWindow?.start ?? '—'} – ${balancing.amWindow?.end ?? '—'}`} />
               <CfgRow k="PM window"      v={`${balancing.pmWindow?.start ?? '—'} – ${balancing.pmWindow?.end ?? '—'}`} />
-              <CfgRow k="Convergence"    v={`${(threshold * 100).toFixed(1)}%`} />
-              <CfgRow k="Max iterations" v={String(balancing.maxIterations ?? 200)} />
+              <CfgRow k="Tolerance"      v="0.5 veh" />
+              <CfgRow k="Max iterations" v={String(maxIter)} />
               {linkCount > 0 && (
                 <CfgRow
                   k="Links"
@@ -245,58 +218,30 @@ export default function S6_RunAnalysis() {
             </button>
             {!hasResults && status === 'idle' && (
               <span className="di-s6-run__hint">
-                Calls /api/balance-nchrp with real NCHRP 255/765 turning-movement
-                refinement. Each intersection gets independent Fratar factoring
-                against link-resolved targets; balanced volumes are floored at
-                raw and rounded up to the next 5.
+                Calls /api/balance-nchrp — pure NCHRP 255/765 turning-movement
+                refinement (per-intersection Fratar factoring against
+                link-resolved targets). Under <em>Larger</em>, Furness scales
+                mostly upward; under <em>Average</em>, individual movements
+                can drop below raw counts (expected NCHRP behavior).
               </span>
             )}
           </div>
 
-          {/* Period cards (during/after run) */}
-          {(isRunning || hasResults) && (
-            <div className="di-s6-pcards">
-              <PeriodCard period="AM" log={amLog} currentIter={amIter} threshold={threshold} done={status === 'done'} />
-              <PeriodCard period="PM" log={pmLog} currentIter={pmIter} threshold={threshold} done={status === 'done'} />
-            </div>
-          )}
-
-          {/* Per-chain summary (Stage 3a) */}
-          {hasResults && (lastRun.chains?.length ?? 0) > 0 && (
-            <div className="di-s6-chains">
-              <h3 className="di-s6-chains__title">
-                Chains ({lastRun.chains.length})
-              </h3>
-              <div className="di-s6-chains__list">
-                {lastRun.chains.map((c) => (
-                  <ChainRow key={c.id} chain={c} />
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Live convergence chart */}
-          {(isRunning || hasResults) && (amLog.length > 0 || pmLog.length > 0) && (
-            <div className="di-s6-chart-wrap">
-              <h3 className="di-s6-chart-wrap__title">Convergence</h3>
-              <ConvergenceChart
-                amLog={amLog}
-                pmLog={pmLog}
-                amIter={amIter}
-                pmIter={pmIter}
-                threshold={threshold}
-              />
-              <div className="di-s6-chart-legend">
-                <span><span className="di-s6-chart-legend__sw" style={{ background: '#FFB627' }} /> AM</span>
-                <span><span className="di-s6-chart-legend__sw" style={{ background: '#0A84FF' }} /> PM</span>
-                <span><span className="di-s6-chart-legend__sw" style={{ background: '#34D399' }} /> threshold</span>
-              </div>
-            </div>
+          {/* Per-intersection convergence summary */}
+          {hasResults && (
+            <IntersectionConvergenceList
+              intersections={intersections}
+              amIters={amIters}
+              pmIters={pmIters}
+              amConv={amConv}
+              pmConv={pmConv}
+              maxIter={maxIter}
+            />
           )}
         </div>
 
         {/* ───── RIGHT (after run) ───── */}
-        {hasResults && <ResultsPanel lastRun={lastRun} threshold={threshold} />}
+        {hasResults && <ResultsPanel lastRun={lastRun} intersections={intersections} />}
       </div>
 
       <footer className="di-s6__footer">
@@ -315,41 +260,6 @@ export default function S6_RunAnalysis() {
 
 // ── Sub-components ──────────────────────────────────────────────────────
 
-function ChainRow({ chain }) {
-  const am = chain.convergence?.AM
-  const pm = chain.convergence?.PM
-  const dot = (conv) => conv?.converged ? 'di-s6-chain__dot--ok' : 'di-s6-chain__dot--warn'
-  const fmt = (conv) => {
-    if (!conv) return '—'
-    const status = conv.converged ? 'converged' : 'no conv'
-    return `${conv.iterations} iter · ${status} · max Δ ${conv.final_max_delta.toFixed(2)}`
-  }
-  return (
-    <div className="di-s6-chain">
-      <div className="di-s6-chain__head">
-        <span className={`di-s6-chain__pill di-s6-chain__pill--${chain.direction.toLowerCase()}`}>
-          {chain.direction}
-        </span>
-        <span className="di-s6-chain__nodes">
-          Intersections {chain.intersections.join(' → ')}
-        </span>
-      </div>
-      <div className="di-s6-chain__stats">
-        <div className="di-s6-chain__row">
-          <span className={`di-s6-chain__dot ${dot(am)}`} />
-          <span className="di-s6-chain__period">AM</span>
-          <span className="di-s6-chain__detail">{fmt(am)}</span>
-        </div>
-        <div className="di-s6-chain__row">
-          <span className={`di-s6-chain__dot ${dot(pm)}`} />
-          <span className="di-s6-chain__period">PM</span>
-          <span className="di-s6-chain__detail">{fmt(pm)}</span>
-        </div>
-      </div>
-    </div>
-  )
-}
-
 function CfgRow({ k, v }) {
   return (
     <div className="di-s6-cfg__row">
@@ -359,76 +269,101 @@ function CfgRow({ k, v }) {
   )
 }
 
-function PeriodCard({ period, log, currentIter, threshold, done }) {
-  const total = log.length
-  const cur = log[currentIter - 1]
-  const gap = cur ? cur.max_relative_gap : 0
-  const converged = total > 0 && log[total - 1].max_relative_gap <= threshold
-  const isDoneShown = done && currentIter >= total
-
-  let stateClass = ''
-  if (isDoneShown && converged) stateClass = ' di-s6-pcard--converged'
-  else if (isDoneShown && !converged) stateClass = ' di-s6-pcard--failed'
-
-  const periodKey = period.toLowerCase()
-  const pct = total > 0 ? (currentIter / total) * 100 : 0
+// ── Per-intersection convergence list (Stage 4 NCHRP) ──────────────────
+// Replaces the old AM/PM PeriodCard + ConvergenceChart. NCHRP balances each
+// intersection independently, so we surface per-intersection iters + converged
+// status. Sorted by num.
+function IntersectionConvergenceList({
+  intersections,
+  amIters, pmIters,
+  amConv, pmConv,
+  maxIter,
+}) {
+  const sorted = [...intersections].sort((a, b) => a.num - b.num)
+  const total = sorted.length
+  const amOk = sorted.filter((it) => amConv[String(it.num)]).length
+  const pmOk = sorted.filter((it) => pmConv[String(it.num)]).length
 
   return (
-    <div className={`di-s6-pcard di-s6-pcard--${periodKey}${stateClass}`}>
-      <div className="di-s6-pcard__head">
-        <span className="di-s6-pcard__dot" />
-        <span className="di-s6-pcard__period">{period}</span>
+    <div className="di-s6-conv">
+      <div className="di-s6-conv__head">
+        <h3 className="di-s6-conv__title">Per-intersection convergence</h3>
+        <span className="di-s6-conv__summary">
+          AM {amOk}/{total} converged · PM {pmOk}/{total} converged
+        </span>
       </div>
-      <div className="di-s6-pcard__big">Iteration {currentIter} / {total || '?'}</div>
-      <div className="di-s6-pcard__gap">{fmtPct(gap)}</div>
-      <div className="di-s6-pcard__bar">
-        <div className="di-s6-pcard__bar-fill" style={{ width: `${pct}%` }} />
+      <div className="di-s6-conv__list">
+        {sorted.map((it) => {
+          const n = String(it.num)
+          const amI = amIters[n] ?? 0
+          const pmI = pmIters[n] ?? 0
+          const amC = !!amConv[n]
+          const pmC = !!pmConv[n]
+          return (
+            <div key={it.id} className="di-s6-conv__row">
+              <div className="di-s6-conv__name">
+                <span className="di-s6-conv__num">{String(it.num).padStart(2, '0')}</span>
+                <span className="di-s6-conv__label">{it.name}</span>
+              </div>
+              <div className="di-s6-conv__cell">
+                <span className={`di-s6-conv__dot ${amC ? 'di-s6-conv__dot--ok' : 'di-s6-conv__dot--warn'}`} />
+                <span className="di-s6-conv__detail">
+                  AM: {amC
+                    ? <>converged in {amI} iter</>
+                    : <>did NOT converge in {amI} iter</>}
+                </span>
+              </div>
+              <div className="di-s6-conv__cell">
+                <span className={`di-s6-conv__dot ${pmC ? 'di-s6-conv__dot--ok' : 'di-s6-conv__dot--warn'}`} />
+                <span className="di-s6-conv__detail">
+                  PM: {pmC
+                    ? <>converged in {pmI} iter</>
+                    : <>did NOT converge in {pmI} iter</>}
+                </span>
+              </div>
+            </div>
+          )
+        })}
       </div>
-      {isDoneShown && (
-        <div className="di-s6-pcard__status">
-          {converged
-            ? `Converged in ${total} iteration${total === 1 ? '' : 's'}`
-            : `Did NOT converge — final gap ${fmtPct(gap)}`}
+      {(amOk < total || pmOk < total) && (
+        <div className="di-s6-conv__hint">
+          Non-convergence at an intersection means Furness hit max_iter ({maxIter})
+          before row + col targets settled within 0.5 veh. Usually caused by large
+          row/col total disagreement (see NCHRP-IMBAL flags below).
         </div>
       )}
     </div>
   )
 }
 
-function ResultsPanel({ lastRun, threshold }) {
-  const amConv = lastRun.convergence?.AM ?? {}
-  const pmConv = lastRun.convergence?.PM ?? {}
+function ResultsPanel({ lastRun, intersections }) {
   const qcFlags = lastRun.qcFlags ?? []
-  const adjustments = lastRun.adjustments ?? { AM: [], PM: [] }
+  const amConv = lastRun.intConverged?.AM ?? {}
+  const pmConv = lastRun.intConverged?.PM ?? {}
+  const total = intersections.length
+  const amOk = intersections.filter((it) => amConv[String(it.num)]).length
+  const pmOk = intersections.filter((it) => pmConv[String(it.num)]).length
 
-  const amLog = amConv.log ?? []
-  const pmLog = pmConv.log ?? []
-  const tblRows = Math.min(15, Math.max(amLog.length, pmLog.length))
-
-  const allAdj = [
-    ...(adjustments.AM ?? []).map((a) => ({ ...a, period: 'AM' })),
-    ...(adjustments.PM ?? []).map((a) => ({ ...a, period: 'PM' })),
-  ]
-    .sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta))
-    .slice(0, 20)
+  const imbalFlags = qcFlags.filter((f) => f.check === 'NCHRP-IMBAL')
+  const convFlags  = qcFlags.filter((f) => f.check === 'NCHRP-CONV')
 
   return (
     <div className="di-s6__right">
-      {/* Hero cards */}
+      {/* Hero cards — per-intersection convergence ratios */}
       <div className="di-s6-hero">
         <HeroCard
-          num={amConv.iterations_used ?? 0}
-          label="AM iterations"
-          ok={amConv.converged}
-          okText="Converged ✓"
-          warnText="Did not converge ⚠"
+          num={`${amOk}/${total}`}
+          label="AM converged"
+          ok={amOk === total}
+          okText="All converged ✓"
+          warnText={`${total - amOk} did not converge ⚠`}
         />
         <HeroCard
-          num={pmConv.iterations_used ?? 0}
-          label="PM iterations"
-          ok={pmConv.converged}
-          okText="Converged ✓"
-          warnText="Did not converge ⚠"
+          num={`${pmOk}/${total}`}
+          label="PM converged"
+          ok={pmOk === total}
+          okText="All converged ✓"
+          warnText={`${total - pmOk} did not converge ⚠`}
         />
         <HeroCard
           num={qcFlags.length}
@@ -439,7 +374,8 @@ function ResultsPanel({ lastRun, threshold }) {
         />
       </div>
 
-      {/* QC flags panel (collapsible) */}
+      {/* QC flags panel (collapsible) — NCHRP-IMBAL + NCHRP-CONV only,
+          NCHRP-FLOOR is gone (the floor was removed) */}
       <Collapsible title="QC flags" count={qcFlags.length}>
         {qcFlags.length === 0 ? (
           <div className="di-s6-qc__empty">
@@ -449,7 +385,9 @@ function ResultsPanel({ lastRun, threshold }) {
           <ul className="di-s6-qc__list">
             {qcFlags.map((f, i) => (
               <li key={i} className="di-s6-qc__item">
-                <span className="di-s6-qc__chip">{f.check}</span>
+                <span className="di-s6-qc__chip">
+                  {f.check}{f.period ? ` · ${f.period}` : ''}
+                </span>
                 <span className="di-s6-qc__msg">{f.message}</span>
               </li>
             ))}
@@ -457,72 +395,14 @@ function ResultsPanel({ lastRun, threshold }) {
         )}
       </Collapsible>
 
-      {/* Convergence log */}
-      <Collapsible title="Convergence log" count={`${amLog.length} / ${pmLog.length}`}>
-        <table className="di-s6-tbl">
-          <thead>
-            <tr>
-              <th>Iter</th>
-              <th>AM gap</th>
-              <th>PM gap</th>
-            </tr>
-          </thead>
-          <tbody>
-            {Array.from({ length: tblRows }).map((_, i) => {
-              const a = amLog[i]
-              const p = pmLog[i]
-              return (
-                <tr key={i}>
-                  <td>{i + 1}</td>
-                  <td className={a && a.max_relative_gap <= threshold ? 'di-s6-tbl__ok' : ''}>
-                    {a ? fmtPct(a.max_relative_gap) : '—'}
-                  </td>
-                  <td className={p && p.max_relative_gap <= threshold ? 'di-s6-tbl__ok' : ''}>
-                    {p ? fmtPct(p.max_relative_gap) : '—'}
-                  </td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
-      </Collapsible>
-
-      {/* Adjustment log */}
-      <Collapsible title="Top adjustments" count={allAdj.length}>
-        {allAdj.length === 0 ? (
-          <div className="di-s6-qc__empty">No adjustments — already balanced.</div>
-        ) : (
-          <table className="di-s6-tbl">
-            <thead>
-              <tr>
-                <th>Int</th>
-                <th>Period</th>
-                <th>Movement</th>
-                <th style={{ textAlign: 'right' }}>Delta</th>
-              </tr>
-            </thead>
-            <tbody>
-              {allAdj.map((a, i) => {
-                const up = a.delta > 0
-                return (
-                  <tr key={i}>
-                    <td>{String(a.intersection_num).padStart(2, '0')}</td>
-                    <td>{a.period}</td>
-                    <td>{a.movement}</td>
-                    <td
-                      style={{ textAlign: 'right' }}
-                      className={up ? 'di-s6-tbl__cell--up' : 'di-s6-tbl__cell--down'}
-                    >
-                      {up ? <ArrowUp size={10} /> : <ArrowDown size={10} />}{' '}
-                      {up ? '+' : ''}{a.delta.toFixed(1)}
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-        )}
-      </Collapsible>
+      {imbalFlags.length > 0 && (
+        <div className="di-s6-qc__note">
+          {imbalFlags.length} intersection{imbalFlags.length === 1 ? '' : 's'} had row/col
+          totals that disagreed before balancing — link-resolved and stub targets
+          were normalized to a common total so Furness could converge. This is a
+          symptom of count-collection inconsistency, not an algorithm error.
+        </div>
+      )}
     </div>
   )
 }

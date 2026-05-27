@@ -896,12 +896,30 @@ def balance_nchrp(
     links,
     method='larger',
     coords=None,
-    apply_floor=True,
     round_to_5=True,
     tol=0.5,
     max_iter=100,
 ):
-    """Top-level NCHRP 255/765 turning-movement refinement.
+    """Top-level NCHRP 255/765 turning-movement refinement — pure Furness.
+
+    Three steps:
+      A) resolve_link_volumes — collapse adjacent counts on each link to one
+         volume per directed edge ('larger' or 'average')
+      B) Per-intersection 4×4 Fratar factoring against link-resolved + raw
+         row/col targets, with conservation normalization (row_total ==
+         col_total) so doubly-constrained Furness can converge
+      D) Round balanced up to next multiple of 5; raw == 0 stays 0
+
+    NOTE on the missing Step C: an earlier version included a "floor" step
+    that clamped balanced[mv] >= raw[mv]. That was removed because (a) Furness
+    is doubly-constrained matrix balancing where the floor is a
+    post-processing override that defeats convergence and creates phantom
+    link conservation violations; (b) under 'larger' resolution Furness
+    mathematically scales movements UP (link target ≥ both individual counts,
+    so factors >= 1; modulo the small effect of target normalization for
+    conservation); (c) under 'average', NCHRP genuinely allows movements
+    below raw — that's standard practice. The S5 Larger/Average toggle gives
+    engineers the stance choice.
 
     Args:
         raw_volumes: { int_num: { movement: value } }
@@ -910,7 +928,6 @@ def balance_nchrp(
         method:      'larger' (default) or 'average' — link disagreement
                      resolution per S5 setting.
         coords:      { int_num: {'lat','lng'} } — for geographic leg ordering.
-        apply_floor: clamp balanced[mv] ≥ raw[mv] for every nonzero raw.
         round_to_5:  round balanced up to next multiple of 5.
         tol:         per-intersection Furness convergence tolerance (veh).
         max_iter:    cap on Furness iterations per intersection.
@@ -919,8 +936,8 @@ def balance_nchrp(
         {
           'balanced': { int_num: { movement: value } },
           'resolved_links': { (u, d, dir): float },
-          'qc_flags': [ {check, int, message}, ... ],
-          'iterations': { int_num: int },   # iters used per intersection
+          'qc_flags': [ {check, int, message}, ... ],   # NCHRP-IMBAL, NCHRP-CONV
+          'iterations': { int_num: int },
           'converged':  { int_num: bool },
           'method':     method,
         }
@@ -981,20 +998,8 @@ def balance_nchrp(
             full[mv] = val
         balanced[int_num] = full
 
-    # Step C: floor
-    if apply_floor:
-        for int_num, balanced_vols in balanced.items():
-            raw = raw_volumes.get(int_num, {})
-            for mv, raw_val in raw.items():
-                if mv not in balanced_vols:
-                    continue
-                if raw_val > 0 and balanced_vols[mv] < raw_val:
-                    qc_flags.append({
-                        'check': 'NCHRP-FLOOR',
-                        'int': int_num,
-                        'message': f"Int {int_num} {mv}: floor activated (balanced {balanced_vols[mv]:.1f} < raw {raw_val}); clamped to raw.",
-                    })
-                    balanced_vols[mv] = float(raw_val)
+    # Step C (floor) intentionally removed — see docstring. Furness alone is
+    # the algorithm; the floor was a post-processing override.
 
     # Step D: round up to next 5
     if round_to_5:
