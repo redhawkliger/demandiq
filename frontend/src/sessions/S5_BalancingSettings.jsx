@@ -95,7 +95,7 @@ export default function S5_BalancingSettings() {
   const am         = balancing.amWindow ?? { start: '07:00', end: '09:00' }
   const pm         = balancing.pmWindow ?? { start: '16:00', end: '18:00' }
   const convStored = balancing.convergenceThreshold ?? 0.01
-  const maxIter    = balancing.maxIterations ?? 200
+  const maxIter    = balancing.maxIterations ?? 500
   const linkModes  = balancing.linkBalanceModes ?? {}
 
   // ── Validation ──────────────────────────────────────────────────────

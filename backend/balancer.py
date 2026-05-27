@@ -764,47 +764,31 @@ def intersection_targets(int_num, raw_volumes, links_by_int, resolved_links):
     return row_targets, col_targets, present
 
 
-def _normalize_targets(row_targets, col_targets, present):
-    """Scale row + col targets so their totals match.
+def furness_intersection(matrix, row_targets, col_targets, present, tol=0.5, max_iter=500):
+    """STEP B — true biproportional iterative fitting (IPF / RAS / Sinkhorn).
 
-    Furness/Fratar is a doubly-constrained matrix-balancing scheme that
-    assumes conservation at each intersection: total cars entering = total
-    cars exiting. Link-resolved row targets (cars arriving from each leg)
-    and col targets (cars departing toward each leg) are derived from
-    different counts and typically DON'T balance — Int 1 in Bodger has
-    row total ~2030 but col total ~2420.
+    Iterates row-scaling and column-scaling on a 4×4 (or masked 3×3) matrix
+    until the MATRIX STABILIZES — that is, until no cell changes by more
+    than `tol` vehicles between consecutive iterations.
 
-    Without normalization, Furness oscillates: row-scale gets rows to
-    targets, col-scale gets cols to targets, but the two passes work
-    against each other → 100% non-convergence on real data.
+    This is the textbook IPF convergence criterion (NCHRP 765, also Sinkhorn-
+    Knopp). It is well-defined regardless of whether the row and column
+    targets sum to the same total. When row_total != col_total, IPF still
+    converges to the KL-divergence-minimum matrix (the "closest" balanced
+    matrix consistent with as much of both target sets as possible); the
+    residual between row sums and row targets (or col sums and col targets)
+    after convergence represents the inherent data inconsistency.
 
-    Fix: scale both target sets to their average total. Each row/col
-    deviates by a small factor (~half of the mismatch) from its raw
-    resolved value, but conservation now holds.
+    Earlier versions of this function pre-normalized targets so their totals
+    matched (averaging row_total and col_total). That was a workaround for
+    the WRONG convergence criterion ("row residuals AND col residuals both <
+    tol") — and it artificially shrank link-resolved targets, propagating
+    bias into the balanced cells. True IPF doesn't need normalization.
 
-    Returns (normalized_row_targets, normalized_col_targets, mismatch_pct)
-    where mismatch_pct is the original imbalance for QC reporting.
-    """
-    row_sum = sum(t for r, t in enumerate(row_targets) if present[r] and t is not None)
-    col_sum = sum(t for c, t in enumerate(col_targets) if present[c] and t is not None)
-    if row_sum <= 0 or col_sum <= 0:
-        return row_targets, col_targets, 0.0
-    target_total = (row_sum + col_sum) / 2.0
-    mismatch_pct = abs(row_sum - col_sum) / target_total * 100.0
-    rf = target_total / row_sum
-    cf = target_total / col_sum
-    new_row = [t * rf if t is not None else None for t in row_targets]
-    new_col = [t * cf if t is not None else None for t in col_targets]
-    return new_row, new_col, mismatch_pct
-
-
-def furness_intersection(matrix, row_targets, col_targets, present, tol=0.5, max_iter=100):
-    """STEP B — iterate row-column Fratar scaling on a 4×4 matrix until row
-    sums and col sums match their targets within `tol` vehicles, or max_iter
-    reached. Cells in rows/cols of absent legs (present[i]=False) stay 0 and
-    are excluded from sums.
-
-    Returns: (matrix, converged_bool, iters_used)
+    Returns: (matrix, converged_bool, iters_used, final_residual)
+        final_residual = max abs(row_sum - row_target, col_sum - col_target)
+                         across all present rows/cols at convergence — the
+                         imbalance the math couldn't resolve.
     """
     M = [row[:] for row in matrix]   # local copy
 
@@ -814,23 +798,22 @@ def furness_intersection(matrix, row_targets, col_targets, present, tol=0.5, max
     def col_sum(c):
         return sum(M[r][c] for r in range(4) if present[r])
 
+    def compute_target_residual():
+        res = 0.0
+        for r in range(4):
+            if present[r] and row_targets[r] is not None:
+                res = max(res, abs(row_sum(r) - row_targets[r]))
+        for c in range(4):
+            if present[c] and col_targets[c] is not None:
+                res = max(res, abs(col_sum(c) - col_targets[c]))
+        return res
+
     iters_used = 0
     converged = False
     for it in range(max_iter):
-        # Convergence check
-        max_diff = 0.0
-        for r in range(4):
-            if not present[r] or row_targets[r] is None:
-                continue
-            max_diff = max(max_diff, abs(row_sum(r) - row_targets[r]))
-        for c in range(4):
-            if not present[c] or col_targets[c] is None:
-                continue
-            max_diff = max(max_diff, abs(col_sum(c) - col_targets[c]))
-        if max_diff < tol:
-            converged = True
-            iters_used = it
-            break
+        # Snapshot the matrix at the start of this iteration so we can measure
+        # how much it changes — that's the IPF convergence signal.
+        prev = [row[:] for row in M]
 
         # Row scaling
         for r in range(4):
@@ -856,7 +839,18 @@ def furness_intersection(matrix, row_targets, col_targets, present, tol=0.5, max
 
         iters_used = it + 1
 
-    return M, converged, iters_used
+        # Convergence by matrix stability: max |M[r][c] - prev[r][c]|
+        max_cell_delta = 0.0
+        for r in range(4):
+            for c in range(4):
+                if present[r] and present[c]:
+                    max_cell_delta = max(max_cell_delta, abs(M[r][c] - prev[r][c]))
+        if max_cell_delta < tol:
+            converged = True
+            break
+
+    final_residual = compute_target_residual()
+    return M, converged, iters_used, final_residual
 
 
 def _build_matrix(int_vols):
@@ -898,28 +892,33 @@ def balance_nchrp(
     coords=None,
     round_to_5=True,
     tol=0.5,
-    max_iter=100,
+    max_iter=500,
 ):
-    """Top-level NCHRP 255/765 turning-movement refinement — pure Furness.
+    """Top-level NCHRP 255/765 turning-movement refinement.
 
     Three steps:
-      A) resolve_link_volumes — collapse adjacent counts on each link to one
-         volume per directed edge ('larger' or 'average')
-      B) Per-intersection 4×4 Fratar factoring against link-resolved + raw
-         row/col targets, with conservation normalization (row_total ==
-         col_total) so doubly-constrained Furness can converge
+      A) resolve_link_volumes — collapse adjacent counts on each link into
+         one volume per directed edge ('larger' or 'average')
+      B) Per-intersection 4×4 biproportional iterative fitting (IPF / RAS /
+         Sinkhorn) against link-resolved + raw row/col targets. NO target
+         pre-normalization — IPF handles imbalanced targets natively by
+         converging on matrix stability (KL-divergence minimum).
       D) Round balanced up to next multiple of 5; raw == 0 stays 0
 
-    NOTE on the missing Step C: an earlier version included a "floor" step
-    that clamped balanced[mv] >= raw[mv]. That was removed because (a) Furness
-    is doubly-constrained matrix balancing where the floor is a
-    post-processing override that defeats convergence and creates phantom
-    link conservation violations; (b) under 'larger' resolution Furness
-    mathematically scales movements UP (link target ≥ both individual counts,
-    so factors >= 1; modulo the small effect of target normalization for
-    conservation); (c) under 'average', NCHRP genuinely allows movements
-    below raw — that's standard practice. The S5 Larger/Average toggle gives
-    engineers the stance choice.
+    History notes (so future readers don't re-introduce broken steps):
+      - Stage 4 included a post-processing "floor" step (clamp balanced ≥
+        raw). Removed in 4b because it defeats Furness convergence and
+        creates phantom link conservation violations.
+      - Stage 4 also included a "target averaging" normalization step
+        (scale row + col targets to their common mean before Furness).
+        Removed in 4c because it (1) artificially shrank link-resolved
+        targets, propagating bias into balanced cells, and (2) was only
+        needed because the old convergence test was the WRONG one (residual-
+        to-target). True IPF uses matrix-stability convergence and handles
+        imbalanced targets natively — see furness_intersection() docstring.
+      - Under 'larger' resolution Furness can still produce some cells
+        below raw because col-scaling shrinks cells after row-scaling
+        raised them; this is the mathematical truth, not a bug.
 
     Args:
         raw_volumes: { int_num: { movement: value } }
@@ -929,17 +928,22 @@ def balance_nchrp(
                      resolution per S5 setting.
         coords:      { int_num: {'lat','lng'} } — for geographic leg ordering.
         round_to_5:  round balanced up to next multiple of 5.
-        tol:         per-intersection Furness convergence tolerance (veh).
-        max_iter:    cap on Furness iterations per intersection.
+        tol:         convergence tolerance (max cell delta between iters,
+                     vehicles).
+        max_iter:    IPF iteration cap per intersection.
 
     Returns:
         {
           'balanced': { int_num: { movement: value } },
           'resolved_links': { (u, d, dir): float },
-          'qc_flags': [ {check, int, message}, ... ],   # NCHRP-IMBAL, NCHRP-CONV
-          'iterations': { int_num: int },
-          'converged':  { int_num: bool },
-          'method':     method,
+          'qc_flags': [ {check, int, message}, ... ],   # NCHRP-RESIDUAL, NCHRP-CONV
+          'iterations':     { int_num: int },
+          'converged':      { int_num: bool },
+          'final_residual': { int_num: float },   # max |row_sum - row_target|
+                                                  # or  |col_sum - col_target|
+                                                  # after IPF converges — the
+                                                  # irreducible imbalance.
+          'method':         method,
         }
     """
     import copy
@@ -948,10 +952,11 @@ def balance_nchrp(
     resolved = resolve_link_volumes(raw_volumes, links, method=method, coords=coords)
     links_by_int = _build_links_by_int(links, coords=coords)
 
-    # Step B: per-intersection Furness
+    # Step B: per-intersection IPF
     balanced = {}
     iterations = {}
     converged_map = {}
+    final_residual_map = {}
     qc_flags = []
 
     for int_num, int_vols in raw_volumes.items():
@@ -964,31 +969,45 @@ def balance_nchrp(
             balanced[int_num] = dict(int_vols)
             iterations[int_num] = 0
             converged_map[int_num] = True
+            final_residual_map[int_num] = 0.0
             continue
 
-        # Normalize targets to satisfy conservation (sum_row == sum_col).
-        # Without this, Furness oscillates on imbalanced real-world data.
-        row_targets, col_targets, mismatch_pct = _normalize_targets(
-            row_targets, col_targets, present
-        )
-        if mismatch_pct > 5.0:
-            qc_flags.append({
-                'check': 'NCHRP-IMBAL',
-                'int': int_num,
-                'message': f"Int {int_num} row/col totals disagreed by {mismatch_pct:.1f}% before balancing — link-resolved and stub targets were normalized to a common total.",
-            })
+        # Compute the raw row/col target totals so we can report imbalance
+        # honestly (without modifying the targets — that's what IPF is for).
+        row_total = sum(t for r, t in enumerate(row_targets) if present[r] and t is not None)
+        col_total = sum(t for c, t in enumerate(col_targets) if present[c] and t is not None)
+        denom = max(row_total, col_total, 1.0)
+        imbalance_pct = abs(row_total - col_total) / denom * 100.0
 
         M = _build_matrix(int_vols)
-        M_out, conv, iters_used = furness_intersection(
+        M_out, conv, iters_used, final_residual = furness_intersection(
             M, row_targets, col_targets, present, tol=tol, max_iter=max_iter
         )
         iterations[int_num] = iters_used
         converged_map[int_num] = conv
+        final_residual_map[int_num] = final_residual
+
+        # Emit NCHRP-RESIDUAL when either the matrix stabilized at a non-zero
+        # residual OR the input row/col totals disagreed by >5%. Same fact
+        # surfaced two ways — engineers can scan for it.
+        if final_residual > tol or imbalance_pct > 5.0:
+            qc_flags.append({
+                'check': 'NCHRP-RESIDUAL',
+                'int': int_num,
+                'message': (
+                    f"Int {int_num}: row/col totals disagree by {imbalance_pct:.1f}% — "
+                    f"final IPF residual {final_residual:.1f} veh. Signals "
+                    f"raw-count inconsistency at this intersection."
+                ),
+            })
         if not conv:
             qc_flags.append({
                 'check': 'NCHRP-CONV',
                 'int': int_num,
-                'message': f"Int {int_num} Furness did not converge in {max_iter} iter; max residual remains.",
+                'message': (
+                    f"Int {int_num}: IPF did not stabilize in {max_iter} iter "
+                    f"(max cell delta still > {tol} veh). Final residual {final_residual:.1f} veh."
+                ),
             })
 
         movements = _extract_matrix(M_out)
@@ -1014,5 +1033,6 @@ def balance_nchrp(
         'qc_flags': qc_flags,
         'iterations': iterations,
         'converged': converged_map,
+        'final_residual': final_residual_map,
         'method': method,
     }

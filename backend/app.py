@@ -367,7 +367,7 @@ async def balance_nchrp_endpoint(payload: dict):
 
     try:
         tol = float(payload.get("tolerance", 0.5))
-        max_iter = int(payload.get("max_iterations", 100))
+        max_iter = int(payload.get("max_iterations", 500))
     except (TypeError, ValueError):
         raise HTTPException(status_code=400, detail="tolerance/max_iterations must be numeric")
 
@@ -433,6 +433,10 @@ async def balance_nchrp_endpoint(payload: dict):
         "converged": {
             "AM": {str(n): c for n, c in am_result['converged'].items()},
             "PM": {str(n): c for n, c in pm_result['converged'].items()},
+        },
+        "final_residual": {
+            "AM": {str(n): r for n, r in am_result['final_residual'].items()},
+            "PM": {str(n): r for n, r in pm_result['final_residual'].items()},
         },
         "qc_flags": qc_all,
         "method": method,

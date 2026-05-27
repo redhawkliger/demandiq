@@ -387,7 +387,10 @@ export function ensureBalancingDefaults() {
     amWindow: cur.amWindow ?? { start: '07:00', end: '09:00' },
     pmWindow: cur.pmWindow ?? { start: '16:00', end: '18:00' },
     convergenceThreshold: cur.convergenceThreshold ?? 0.01,
-    maxIterations: cur.maxIterations ?? 200,
+    // Stage 4c: IPF default — converges via matrix stability on imbalanced
+    // targets, which can take more iterations than the old residual-to-target
+    // criterion. 500 is comfortable headroom for branching corridors.
+    maxIterations: cur.maxIterations ?? 500,
     linkBalanceModes: { ...defaultLinkModes, ...(cur.linkBalanceModes ?? {}) },
   }
 

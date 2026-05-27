@@ -129,6 +129,7 @@ export default function S6_RunAnalysis() {
         resolvedLinks: data.resolved_links ?? { AM: [], PM: [] },
         iterations: data.iterations ?? { AM: {}, PM: {} },
         intConverged: data.converged ?? { AM: {}, PM: {} },
+        finalResidual: data.final_residual ?? { AM: {}, PM: {} },   // Stage 4c
         qcFlags: data.qc_flags ?? [],
         // Stage 4 has no chains[] (algorithm is per-intersection, not chain-based)
         chains: [],
@@ -159,7 +160,9 @@ export default function S6_RunAnalysis() {
   const pmIters = lastRun?.iterations?.PM ?? {}
   const amConv  = lastRun?.intConverged?.AM ?? {}
   const pmConv  = lastRun?.intConverged?.PM ?? {}
-  const maxIter = balancing.maxIterations ?? 100
+  const amResid = lastRun?.finalResidual?.AM ?? {}
+  const pmResid = lastRun?.finalResidual?.PM ?? {}
+  const maxIter = balancing.maxIterations ?? 500
 
   // Mode breakdown for the config card
   const linkModes = balancing.linkBalanceModes ?? {}
@@ -235,6 +238,8 @@ export default function S6_RunAnalysis() {
               pmIters={pmIters}
               amConv={amConv}
               pmConv={pmConv}
+              amResid={amResid}
+              pmResid={pmResid}
               maxIter={maxIter}
             />
           )}
@@ -269,20 +274,56 @@ function CfgRow({ k, v }) {
   )
 }
 
-// ── Per-intersection convergence list (Stage 4 NCHRP) ──────────────────
-// Replaces the old AM/PM PeriodCard + ConvergenceChart. NCHRP balances each
-// intersection independently, so we surface per-intersection iters + converged
-// status. Sorted by num.
+// ── Per-intersection convergence list (Stage 4c NCHRP IPF) ──────────────
+// IPF convergence test = matrix stability (max cell delta between
+// iterations < tol). When row_total != col_total, IPF still stabilizes but
+// leaves a final_residual that quantifies the irreducible imbalance — that's
+// the engineer's signal of count-collection inconsistency at that node.
+//
+// Display logic per state:
+//   converged + residual < 0.5  → "converged in N iter"        (green dot)
+//   converged + residual >= 0.5 → "balanced — N iter, R veh residual"  (amber dot)
+//   not converged               → "did NOT stabilize in N iter"  (red dot — rare with IPF)
 function IntersectionConvergenceList({
   intersections,
   amIters, pmIters,
   amConv, pmConv,
+  amResid, pmResid,
   maxIter,
 }) {
   const sorted = [...intersections].sort((a, b) => a.num - b.num)
   const total = sorted.length
   const amOk = sorted.filter((it) => amConv[String(it.num)]).length
   const pmOk = sorted.filter((it) => pmConv[String(it.num)]).length
+
+  const renderStatus = (period, iters, converged, residual) => {
+    if (!converged) {
+      return (
+        <>
+          <span className="di-s6-conv__dot di-s6-conv__dot--fail" />
+          <span className="di-s6-conv__detail">
+            {period}: did NOT stabilize in {iters} iter (max iter reached)
+          </span>
+        </>
+      )
+    }
+    if (residual >= 0.5) {
+      return (
+        <>
+          <span className="di-s6-conv__dot di-s6-conv__dot--warn" />
+          <span className="di-s6-conv__detail">
+            {period}: balanced — {iters} iter, {residual.toFixed(1)} veh residual
+          </span>
+        </>
+      )
+    }
+    return (
+      <>
+        <span className="di-s6-conv__dot di-s6-conv__dot--ok" />
+        <span className="di-s6-conv__detail">{period}: converged in {iters} iter</span>
+      </>
+    )
+  }
 
   return (
     <div className="di-s6-conv">
@@ -295,10 +336,6 @@ function IntersectionConvergenceList({
       <div className="di-s6-conv__list">
         {sorted.map((it) => {
           const n = String(it.num)
-          const amI = amIters[n] ?? 0
-          const pmI = pmIters[n] ?? 0
-          const amC = !!amConv[n]
-          const pmC = !!pmConv[n]
           return (
             <div key={it.id} className="di-s6-conv__row">
               <div className="di-s6-conv__name">
@@ -306,32 +343,22 @@ function IntersectionConvergenceList({
                 <span className="di-s6-conv__label">{it.name}</span>
               </div>
               <div className="di-s6-conv__cell">
-                <span className={`di-s6-conv__dot ${amC ? 'di-s6-conv__dot--ok' : 'di-s6-conv__dot--warn'}`} />
-                <span className="di-s6-conv__detail">
-                  AM: {amC
-                    ? <>converged in {amI} iter</>
-                    : <>did NOT converge in {amI} iter</>}
-                </span>
+                {renderStatus('AM', amIters[n] ?? 0, !!amConv[n], amResid[n] ?? 0)}
               </div>
               <div className="di-s6-conv__cell">
-                <span className={`di-s6-conv__dot ${pmC ? 'di-s6-conv__dot--ok' : 'di-s6-conv__dot--warn'}`} />
-                <span className="di-s6-conv__detail">
-                  PM: {pmC
-                    ? <>converged in {pmI} iter</>
-                    : <>did NOT converge in {pmI} iter</>}
-                </span>
+                {renderStatus('PM', pmIters[n] ?? 0, !!pmConv[n], pmResid[n] ?? 0)}
               </div>
             </div>
           )
         })}
       </div>
-      {(amOk < total || pmOk < total) && (
-        <div className="di-s6-conv__hint">
-          Non-convergence at an intersection means Furness hit max_iter ({maxIter})
-          before row + col targets settled within 0.5 veh. Usually caused by large
-          row/col total disagreement (see NCHRP-IMBAL flags below).
-        </div>
-      )}
+      <div className="di-s6-conv__hint">
+        Residual &gt; 0.5 veh indicates raw-count inconsistency at that intersection.
+        IPF found the closest balanced matrix; the residual is the math telling you
+        the entry and exit counts don&apos;t fully agree. Review the NCHRP-RESIDUAL
+        flags for the imbalance percentage; consider re-counting if residual is
+        large (&gt; 20 veh).
+      </div>
     </div>
   )
 }
@@ -344,8 +371,7 @@ function ResultsPanel({ lastRun, intersections }) {
   const amOk = intersections.filter((it) => amConv[String(it.num)]).length
   const pmOk = intersections.filter((it) => pmConv[String(it.num)]).length
 
-  const imbalFlags = qcFlags.filter((f) => f.check === 'NCHRP-IMBAL')
-  const convFlags  = qcFlags.filter((f) => f.check === 'NCHRP-CONV')
+  const residualFlags = qcFlags.filter((f) => f.check === 'NCHRP-RESIDUAL')
 
   return (
     <div className="di-s6__right">
@@ -395,12 +421,13 @@ function ResultsPanel({ lastRun, intersections }) {
         )}
       </Collapsible>
 
-      {imbalFlags.length > 0 && (
+      {residualFlags.length > 0 && (
         <div className="di-s6-qc__note">
-          {imbalFlags.length} intersection{imbalFlags.length === 1 ? '' : 's'} had row/col
-          totals that disagreed before balancing — link-resolved and stub targets
-          were normalized to a common total so Furness could converge. This is a
-          symptom of count-collection inconsistency, not an algorithm error.
+          {residualFlags.length} intersection{residualFlags.length === 1 ? '' : 's'} balanced with
+          a non-zero residual. IPF reached a stable matrix at each, but the row and
+          column count totals couldn&apos;t fully agree — a signal of inconsistent
+          counts (different survey days, partial coverage, etc), not an algorithm
+          error. See each NCHRP-RESIDUAL flag for the per-intersection imbalance %.
         </div>
       )}
     </div>

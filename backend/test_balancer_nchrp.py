@@ -26,17 +26,19 @@ def mk(d): m=dict(FULL); m.update(d); return m
 def test_furness_4x4_known_answer():
     """Start matrix: cells all 10. Row targets [100,100,100,100], col targets
     same. Result must be 25 in every cell (every row and col sums to 100,
-    proportions preserved)."""
+    proportions preserved). Balanced targets → IPF converges in 1 step.
+    NB: furness_intersection now returns 4-tuple (matrix, conv, iters, residual)."""
     M = [[10.0]*4 for _ in range(4)]
     row_t = [100, 100, 100, 100]
     col_t = [100, 100, 100, 100]
     present = [True, True, True, True]
-    M_out, conv, iters = furness_intersection(M, row_t, col_t, present, tol=0.01, max_iter=50)
+    M_out, conv, iters, residual = furness_intersection(M, row_t, col_t, present, tol=0.01, max_iter=50)
     assert conv, f"didn't converge in {iters} iters"
     for r in range(4):
         for c in range(4):
             assert abs(M_out[r][c] - 25.0) < 0.05, f"cell ({r},{c}) = {M_out[r][c]}, expected 25"
-    print(f"  test_furness_4x4_known_answer: PASS (converged in {iters} iter)")
+    assert residual < 0.05, f"residual should be ~0 on balanced targets; got {residual}"
+    print(f"  test_furness_4x4_known_answer: PASS (converged in {iters} iter, residual={residual:.4f})")
 
 
 # ─── Test 2 — link resolution: 'larger' vs 'average' ────────────────────────
@@ -100,8 +102,8 @@ def test_3leg_t_intersection():
     assert present[3] is True, "E leg should be present"
 
     M = _build_matrix(vols)
-    M_out, conv, iters = furness_intersection(M, row_targets, col_targets, present,
-                                              tol=0.01, max_iter=50)
+    M_out, conv, iters, residual = furness_intersection(M, row_targets, col_targets, present,
+                                                        tol=0.01, max_iter=50)
     assert conv, "3-leg T should converge"
     # The W-leg row stays all zeros
     for c in range(4):
@@ -274,6 +276,54 @@ def test_end_to_end_3int_corridor():
     print(f"    resolved EB link 1→2: {result['resolved_links'][(1,2,'EB')]:.0f}  (max of 1050, 1150)")
 
 
+# ─── Test 7 — imbalanced 4×4 IPF (the Stage 4c change) ──────────────────────
+def test_imbalanced_4x4_ipf():
+    """IPF must handle row_total != col_total without pre-normalization.
+
+    Row targets sum to 1000; col targets sum to 1500. Pre-Stage-4c code
+    would have averaged them to 1250 then pretended targets matched — that
+    silently shifted both target sets and propagated bias.
+
+    True IPF (Stage 4c) iterates row-scale + col-scale until cells stop
+    moving (matrix stability), accepts that residuals to targets persist,
+    and reports the residual honestly.
+    """
+    # Start: all cells = 50. Initial row sums = 200, col sums = 200.
+    M = [[50.0] * 4 for _ in range(4)]
+    row_t = [200, 200, 300, 300]   # total = 1000
+    col_t = [400, 400, 350, 350]   # total = 1500
+    present = [True, True, True, True]
+
+    M_out, conv, iters, residual = furness_intersection(
+        M, row_t, col_t, present, tol=0.01, max_iter=500
+    )
+
+    # Should converge by MATRIX-STABILITY criterion despite imbalanced targets
+    assert conv, f"IPF should reach a stable matrix even with imbalanced targets; got iters={iters}"
+
+    # The residual to targets should be > 0 — that's the irreducible imbalance
+    assert residual > 0.5, \
+        f"final_residual should expose imbalance (got {residual:.2f}); IPF can't satisfy both target sets simultaneously"
+
+    # No cell should be NaN / negative — matrix stays positive
+    for r in range(4):
+        for c in range(4):
+            assert M_out[r][c] >= 0, f"cell ({r},{c}) went negative: {M_out[r][c]}"
+
+    # Row sums should land near (row_total / col_total * row_target) → because
+    # col scaling is the last operation, col sums match col targets exactly,
+    # and row sums end at scaled-down versions of row targets.
+    # We don't assert exact numbers here, just that the matrix is well-formed.
+    row_sums_out = [sum(M_out[r]) for r in range(4)]
+    col_sums_out = [sum(M_out[r][c] for r in range(4)) for c in range(4)]
+
+    print(f"  test_imbalanced_4x4_ipf: PASS")
+    print(f"    converged in {iters} iter, final_residual = {residual:.2f} veh")
+    print(f"    target row totals: 1000  → output row sum: {sum(row_sums_out):.0f}")
+    print(f"    target col totals: 1500  → output col sum: {sum(col_sums_out):.0f}")
+    print(f"    (last-pass col scaling sets col sums to col targets; row sums absorb the imbalance)")
+
+
 if __name__ == '__main__':
     tests = [
         test_furness_4x4_known_answer,
@@ -282,6 +332,7 @@ if __name__ == '__main__':
         test_larger_never_below_raw,
         test_average_can_go_below_raw,
         test_end_to_end_3int_corridor,
+        test_imbalanced_4x4_ipf,
     ]
     passed = 0
     failed = 0
