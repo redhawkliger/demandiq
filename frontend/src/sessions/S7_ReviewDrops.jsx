@@ -380,6 +380,14 @@ export default function S7_ReviewDrops() {
       <footer className="di-s7r__footer">
         <button
           type="button"
+          className="di-btn-secondary"
+          onClick={() => navigate('/map?view=post')}
+          title="Open the corridor map with post-balance volumes for visual review"
+        >
+          View flow map
+        </button>
+        <button
+          type="button"
           className="di-btn-primary"
           onClick={() => navigate('/results')}
         >

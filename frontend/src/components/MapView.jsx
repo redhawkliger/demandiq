@@ -3,10 +3,22 @@ import { MapContainer, TileLayer, ZoomControl, useMap, useMapEvents } from 'reac
 import L from 'leaflet'
 import { Search, X, Loader2 } from 'lucide-react'
 import { searchPhoton } from '../lib/photon'
+import { buildLinkFlows, fmtPair } from '../lib/flowMap'
 
 const TILE_URL = 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
 const TILE_ATTR =
   '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
+
+// Zoom thresholds for flow-label visibility (spec §6.7)
+const FLOW_LABEL_FADE_ZOOM = 13
+const FLOW_LABEL_HIDE_ZOOM = 11
+// Flow label placement: each marker's latlng IS the polyline midpoint.
+// Direction-specific CSS transforms on .di-flow-label__inner[data-dir]
+// anchor the label by the EDGE facing the polyline (8px gap), so labels
+// CAN'T overlap regardless of their width — center-to-center offset math
+// couldn't make that promise once labels exceeded the offset value.
+// Convention follows the "driver's right" rule: EB south, WB north,
+// NB east, SB west.
 
 const numberedIcon = (num, { armed = false, linkable = false } = {}) =>
   L.divIcon({
@@ -39,14 +51,18 @@ function ClickHandler({ onClick }) {
 //   'intersections' → existing behavior (non-interactive pins, dashed corridor)
 //   'links'         → pins are clickable to arm/connect; dashed corridor hidden
 //                     to avoid visual confusion with explicit link polylines
-function MapLayers({ intersections, pendingPin, mode, armedId, onIntersectionClick }) {
+function MapLayers({ intersections, pendingPin, mode, viewMode, armedId, onIntersectionClick }) {
   const map = useMap()
   const markersRef = useRef([])
   const polylineRef = useRef(null)
   const pendingRef = useRef(null)
   const initialFitRef = useRef(false)
 
-  // Confirmed numbered markers + dashed corridor polyline (corridor hidden in link mode)
+  // Confirmed numbered markers + dashed corridor polyline. Corridor is an
+  // editing-mode visual aid showing intersection ORDER; it walks through
+  // every intersection regardless of which links the engineer drew. In
+  // flow view modes ('pre' / 'post') that's misleading — a deleted link
+  // would still appear as a dashed segment — so we suppress it there.
   useEffect(() => {
     markersRef.current.forEach((m) => m.remove())
     markersRef.current = []
@@ -70,7 +86,8 @@ function MapLayers({ intersections, pendingPin, mode, armedId, onIntersectionCli
       }
       markersRef.current.push(m)
     })
-    if (mode !== 'links' && intersections.length >= 2) {
+    const isFlow = viewMode === 'pre' || viewMode === 'post'
+    if (mode !== 'links' && !isFlow && intersections.length >= 2) {
       polylineRef.current = L.polyline(
         intersections.map((it) => [it.lat, it.lng]),
         {
@@ -82,7 +99,7 @@ function MapLayers({ intersections, pendingPin, mode, armedId, onIntersectionCli
         }
       ).addTo(map)
     }
-  }, [intersections, mode, armedId, onIntersectionClick, map])
+  }, [intersections, mode, viewMode, armedId, onIntersectionClick, map])
 
   // Amber pending marker
   useEffect(() => {
@@ -122,38 +139,64 @@ function MapLayers({ intersections, pendingPin, mode, armedId, onIntersectionCli
 }
 
 // ── Link polylines ────────────────────────────────────────────────────
-// Renders one straight-line polyline per link, direction-coded by color.
+// Renders one straight-line polyline per link.
+// Color rules:
+//   mode === 'links'              → direction-coded (EB/WB blue, NB/SB amber)
+//                                   for the editing UX
+//   viewMode === 'pre' | 'post'   → imbalance-coded (green / amber / red)
+//                                   using buildLinkFlows() to derive the
+//                                   worst per-link % across AM and PM
+//   otherwise                     → direction-coded (legacy default)
 // CRITICAL: each polyline is drawn as a direct from→to segment — never routed
 // through any other intersection that happens to sit between them on the map.
-// This makes branching/skip topologies (e.g. 5→7 when 6 is between them)
-// render correctly. Clickable only in 'links' mode; otherwise pass-through
-// so existing UX is unchanged.
-function LinkLayers({ intersections, links, mode, selectedLinkId, onSelectLink }) {
+// Clickable in 'links' mode (edits) AND in flow modes ('pre' / 'post', opens
+// the flow popup). The same onSelectLink callback fires in both cases —
+// the parent decides which popup to render.
+function LinkLayers({
+  intersections, links, mode, viewMode,
+  selectedLinkId, onSelectLink,
+  lastRun, overrides,
+}) {
   const map = useMap()
   const linesRef = useRef([])
+  const isFlow = viewMode === 'pre' || viewMode === 'post'
 
   useEffect(() => {
     linesRef.current.forEach((l) => l.remove())
     linesRef.current = []
     const byId = new Map(intersections.map((it) => [it.id, it]))
 
+    // In flow mode, precompute imbalance color per link.
+    const flowsByLinkId = new Map()
+    if (isFlow) {
+      const flows = buildLinkFlows(links, intersections, viewMode, { lastRun, overrides })
+      for (const f of flows) flowsByLinkId.set(f.link.id, f)
+    }
+
     for (const link of links) {
       const from = byId.get(link.fromId)
       const to = byId.get(link.toId)
       if (!from || !to) continue  // orphaned link (e.g. intersection deleted) — skip
-      const color = LINK_COLORS[link.direction] || '#0A84FF'
+
+      let color
+      if (isFlow) {
+        color = flowsByLinkId.get(link.id)?.polyColor || '#6B7280'
+      } else {
+        color = LINK_COLORS[link.direction] || '#0A84FF'
+      }
       const selected = link.id === selectedLinkId
+      const interactive = mode === 'links' || isFlow
       const polyline = L.polyline(
         [[from.lat, from.lng], [to.lat, to.lng]],
         {
           color,
           weight: selected ? 5 : 3.5,
           opacity: selected ? 1 : 0.9,
-          interactive: mode === 'links',
+          interactive,
           pane: 'overlayPane',     // below markerPane → pins stay clickable
         }
       ).addTo(map)
-      if (mode === 'links' && onSelectLink) {
+      if (interactive && onSelectLink) {
         polyline.on('click', (e) => {
           L.DomEvent.stopPropagation(e)
           const pt = map.latLngToContainerPoint(e.latlng)
@@ -162,7 +205,7 @@ function LinkLayers({ intersections, links, mode, selectedLinkId, onSelectLink }
       }
       linesRef.current.push(polyline)
     }
-  }, [intersections, links, mode, selectedLinkId, onSelectLink, map])
+  }, [intersections, links, mode, viewMode, isFlow, selectedLinkId, onSelectLink, lastRun, overrides, map])
 
   // Close popup on map pan/zoom — popup position is computed at click time
   // and would drift otherwise
@@ -181,6 +224,102 @@ function LinkLayers({ intersections, links, mode, selectedLinkId, onSelectLink }
     linesRef.current.forEach((l) => l.remove())
   }, [])
 
+  return null
+}
+
+// ── Flow-mode volume labels (Stage 6) ─────────────────────────────────
+// One divIcon per directed link, positioned at the link midpoint with a
+// perpendicular pixel offset so EB / WB (or NB / SB) labels don't overlap
+// each other. Re-renders on zoom (for the fade-out behavior).
+function FlowLabels({
+  intersections, links, viewMode, showDirLabels,
+  lastRun, overrides,
+}) {
+  const map = useMap()
+  const markersRef = useRef([])
+  const [zoom, setZoom] = useState(() => map.getZoom())
+
+  useEffect(() => {
+    const onZoom = () => setZoom(map.getZoom())
+    map.on('zoomend', onZoom)
+    return () => { map.off('zoomend', onZoom) }
+  }, [map])
+
+  useEffect(() => {
+    // Wipe + rebuild markers
+    markersRef.current.forEach((m) => m.remove())
+    markersRef.current = []
+
+    if (viewMode !== 'pre' && viewMode !== 'post') return
+    if (zoom < FLOW_LABEL_HIDE_ZOOM) return    // hidden entirely
+
+    const opacity = zoom < FLOW_LABEL_FADE_ZOOM ? 0.3 : 1
+    const flows = buildLinkFlows(links, intersections, viewMode, { lastRun, overrides })
+
+    for (const f of flows) {
+      // Spec §fix-v2: post view + link has no lastRun match → render the
+      // polyline gray (already handled in LinkLayers) and skip labels.
+      if (viewMode === 'post' && !f.hasLastRunData) continue
+      // Both directed labels share the same anchor latlng — the polyline
+      // midpoint. The CSS transform (keyed off data-dir) places each label
+      // on the correct side, by its facing edge, so they cannot overlap.
+      const midLat = (f.from.lat + f.to.lat) / 2
+      const midLng = (f.from.lng + f.to.lng) / 2
+      const latlng = [midLat, midLng]
+
+      for (const pd of f.directeds) {
+        const dirCode = pd.directed.direction
+        const am = pd.flows.AM
+        const pm = pd.flows.PM
+        const text = fmtPair(
+          viewMode === 'post' ? am.postValue ?? am.upOut : am.upOut,
+          viewMode === 'post' ? pm.postValue ?? pm.upOut : pm.upOut,
+        )
+        const colorAM = am.color
+        const colorPM = pm.color
+        const dirChip = showDirLabels
+          ? `<span class="di-flow-label__dir">${dirCode}</span>`
+          : ''
+        const html = `
+          <div class="di-flow-label__inner" data-dir="${dirCode}" style="opacity:${opacity}">
+            ${dirChip}<span class="di-flow-label__num" style="--am:${colorAM};--pm:${colorPM}">${text}</span>
+          </div>
+        `
+        const icon = L.divIcon({
+          className: 'di-flow-label',
+          html,
+          iconSize: [0, 0],     // size-from-content
+          iconAnchor: [0, 0],
+        })
+        const m = L.marker(latlng, {
+          icon,
+          interactive: false,
+          keyboard: false,
+          pane: 'markerPane',
+        }).addTo(map)
+        markersRef.current.push(m)
+      }
+    }
+  }, [intersections, links, viewMode, showDirLabels, lastRun, overrides, zoom, map])
+
+  useEffect(() => () => {
+    markersRef.current.forEach((m) => m.remove())
+  }, [])
+
+  return null
+}
+
+// Expose the L.TileLayer instance up to the parent so the PNG export
+// helper can call setUrl() to swap dark → light tiles for the capture.
+function TileLayerHandle({ onReady }) {
+  const map = useMap()
+  useEffect(() => {
+    let tileLayer = null
+    map.eachLayer((layer) => {
+      if (layer instanceof L.TileLayer) tileLayer = layer
+    })
+    if (tileLayer && onReady) onReady(tileLayer)
+  }, [map, onReady])
   return null
 }
 
@@ -295,6 +434,12 @@ export default function MapView({
   selectedLinkId = null,
   onIntersectionClick,
   onSelectLink,
+  // Stage 6 — flow-map props (optional)
+  viewMode = 'edit',                 // 'edit' | 'pre' | 'post'
+  showDirLabels = false,
+  lastRun = null,
+  overrides = { AM: {}, PM: {} },
+  onTileLayerReady,                  // (L.TileLayer) => void
 }) {
   return (
     <MapContainer
@@ -305,20 +450,38 @@ export default function MapView({
       zoomControl={false}
       style={{ width: '100%', height: '100%' }}
     >
-      <TileLayer url={TILE_URL} attribution={TILE_ATTR} subdomains={['a', 'b', 'c', 'd']} />
+      <TileLayer
+        url={TILE_URL}
+        attribution={TILE_ATTR}
+        subdomains={['a', 'b', 'c', 'd']}
+        crossOrigin="anonymous"
+      />
+      <TileLayerHandle onReady={onTileLayerReady} />
       <ZoomControl position="bottomright" />
       <ClickHandler onClick={onMapClick} />
       <LinkLayers
         intersections={intersections}
         links={links}
         mode={mode}
+        viewMode={viewMode}
         selectedLinkId={selectedLinkId}
         onSelectLink={onSelectLink}
+        lastRun={lastRun}
+        overrides={overrides}
+      />
+      <FlowLabels
+        intersections={intersections}
+        links={links}
+        viewMode={viewMode}
+        showDirLabels={showDirLabels}
+        lastRun={lastRun}
+        overrides={overrides}
       />
       <MapLayers
         intersections={intersections}
         pendingPin={pendingPin}
         mode={mode}
+        viewMode={viewMode}
         armedId={armedId}
         onIntersectionClick={onIntersectionClick}
       />

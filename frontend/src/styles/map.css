@@ -630,3 +630,234 @@
   color: var(--text-primary);
   border-color: var(--border-strong);
 }
+
+/* ─── Stage 6: balance flow map ─────────────────────────────────────────
+ * Bottom-center, stacked just above the Stage 2 "Modify links" toggle
+ * (which sits at bottom: 12px). Two-row layout matching the spec: the
+ * Pre/Post segmented control on top, then the direction-labels checkbox
+ * + Export PNG button. */
+.di-s2-flow-toolbar {
+  position: absolute;
+  bottom: 56px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  padding: 6px 10px;
+  background: var(--bg-base);
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+.di-s2-flow-toolbar__row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+}
+.di-s2-flow-toolbar__seg {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 6px;
+}
+.di-s2-flow-toolbar__opt {
+  padding: 4px 10px;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  border-radius: 5px;
+  transition: background 120ms, color 120ms;
+}
+.di-s2-flow-toolbar__opt:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+.di-s2-flow-toolbar__opt--on,
+.di-s2-flow-toolbar__opt--on:hover {
+  background: var(--accent);
+  color: #FFFFFF;
+}
+.di-s2-flow-toolbar__opt:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.di-s2-flow-toolbar__check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  user-select: none;
+}
+.di-s2-flow-toolbar__check input[type="checkbox"] {
+  accent-color: var(--accent);
+  margin: 0;
+}
+.di-s2-flow-toolbar__check:has(input:disabled) {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.di-s2-flow-toolbar__export {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 120ms, border-color 120ms;
+}
+.di-s2-flow-toolbar__export:hover:not(:disabled) {
+  background: var(--bg-hover);
+  border-color: var(--accent);
+}
+.di-s2-flow-toolbar__export:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* Stale-lastRun banner (just below the toolbar, top-center) */
+.di-s2-flow-stale {
+  position: absolute;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1000;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  background: rgba(255, 182, 39, 0.92);
+  color: #1A1F2C;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+/* Per-link directional volume label — divIcon HTML. */
+.di-flow-label {
+  background: transparent;
+  border: none;
+  pointer-events: none;
+}
+.di-flow-label__inner {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  background: rgba(20, 24, 35, 0.78);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 4px;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  font-weight: 600;
+  color: #FFFFFF;
+  white-space: nowrap;
+  transition: opacity 200ms ease;
+}
+/* Edge-anchored positioning per direction. The marker latlng IS the
+ * polyline midpoint (which Leaflet maps to the divIcon's top-left at
+ * iconAnchor [0,0]); these transforms shift the label by its OWN width/
+ * height + an 8px gap so the edge facing the line sits 8px off it. */
+.di-flow-label__inner[data-dir="EB"] {
+  /* South of line: horizontally centered on midpoint, top edge 8px below */
+  transform: translate(-50%, 8px);
+}
+.di-flow-label__inner[data-dir="WB"] {
+  /* North of line: horizontally centered, bottom edge 8px above midpoint */
+  transform: translate(-50%, calc(-100% - 8px));
+}
+.di-flow-label__inner[data-dir="NB"] {
+  /* East of line: left edge 8px east of midpoint, vertically centered */
+  transform: translate(8px, -50%);
+}
+.di-flow-label__inner[data-dir="SB"] {
+  /* West of line: right edge 8px west of midpoint, vertically centered */
+  transform: translate(calc(-100% - 8px), -50%);
+}
+.di-flow-label__dir {
+  padding: 0 4px;
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 3px;
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  color: #FFFFFF;
+}
+.di-flow-label__num {
+  /* AM coloring lives on the outer text color via CSS var --am; PM is
+   * inherited unless an inner span overrides. For now the single span
+   * uses --am as its foreground — engineers identify drops by the link
+   * polyline color, not per-label gradient. */
+  color: var(--am, #FFFFFF);
+}
+
+/* Flow popup — read-only, same chrome family as the edit popup */
+.di-flow-popup {
+  min-width: 260px;
+}
+.di-flow-popup__mode {
+  margin-left: 8px;
+  padding: 1px 6px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+.di-flow-popup__section {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+.di-flow-popup__section:first-of-type {
+  margin-top: 6px;
+}
+.di-flow-popup__sec-head {
+  font-size: 11px;
+  font-weight: 600;
+  margin-bottom: 4px;
+  color: var(--text-primary);
+}
+.di-flow-popup__sec-dir {
+  padding: 1px 5px;
+  background: var(--accent);
+  color: #FFFFFF;
+  border-radius: 3px;
+  font-size: 10px;
+  letter-spacing: 0.05em;
+}
+.di-flow-popup__sec-route {
+  color: var(--text-secondary);
+  font-weight: 400;
+}
+.di-flow-popup__row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 11px;
+  color: var(--text-secondary);
+  padding: 2px 0;
+}
+.di-flow-popup__val {
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+  font-weight: 600;
+}
