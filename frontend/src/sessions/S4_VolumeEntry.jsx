@@ -1,16 +1,20 @@
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Upload, AlertTriangle, X } from 'lucide-react'
+import { Upload, AlertTriangle, X, ClipboardPaste } from 'lucide-react'
 
 import {
   subscribe,
   getSnapshot,
   getIntersections,
   applyExtractedVolumes,
+  setCellValue,
+  setPhf,
+  setHvPct,
 } from '../store/projectStore'
 import UploadBar from '../components/UploadBar'
 import VolumeGrid from '../components/VolumeGrid'
 import { matchAgentToProject } from '../lib/matching'
+import { parseBulkVolumes, applyParsedRows, MOVEMENT_CODES } from '../lib/bulkPaste'
 
 import '../styles/forms.css'
 import '../styles/map.css'         // .di-modal*, .di-banner, .di-btn-secondary, .di-btn-primary
@@ -77,6 +81,9 @@ export default function S4_VolumeEntry() {
   // Each entry: { file: string, message: string }. Cleared at the start of every
   // extraction run AND on user dismiss — but never on unrelated re-renders.
   const [extractWarnings, setExtractWarnings] = useState([])
+
+  // Stage 10.3: bulk paste/import modal
+  const [pasteOpen, setPasteOpen] = useState(false)
 
   const uploadRegionRef = useRef(null)
 
@@ -271,7 +278,24 @@ export default function S4_VolumeEntry() {
           onRemove={removeFile}
           onExtract={runExtract}
         />
+        <div className="di-s4__paste-row">
+          <span className="di-s4__paste-or">or</span>
+          <button
+            type="button"
+            className="di-btn-secondary di-s4__paste-btn"
+            onClick={() => setPasteOpen(true)}
+          >
+            <ClipboardPaste size={14} /> Bulk paste from spreadsheet
+          </button>
+        </div>
       </div>
+
+      {pasteOpen && (
+        <BulkPasteModal
+          intersections={intersections}
+          onClose={() => setPasteOpen(false)}
+        />
+      )}
 
       {skewed.length > 0 && (
         <div className="di-s4__skew-notice">
@@ -400,6 +424,142 @@ function NeedsVolumeRow({ intersection, missing, available, onAssign, onUpload }
           </button>
         </>
       )}
+    </div>
+  )
+}
+
+// ── Stage 10.3: bulk paste/import modal ─────────────────────────────────
+const PASTE_TEMPLATE =
+  'Int#\tPeriod\tEBL\tEBT\tEBR\tWBL\tWBT\tWBR\tNBL\tNBT\tNBR\tSBL\tSBT\tSBR\tPHF\tHV'
+
+function BulkPasteModal({ intersections, onClose }) {
+  const [text, setText] = useState('')
+  const [applied, setApplied] = useState(null)   // {cells, intersections} after Apply
+
+  const parsed = useMemo(
+    () => parseBulkVolumes(text, { intersections }),
+    [text, intersections],
+  )
+
+  const rowErrors = parsed.rows.reduce((n, r) => n + r.errors.length, 0)
+  const rowWarnings = parsed.rows.reduce((n, r) => n + r.warnings.length, 0)
+  const canApply = parsed.errors.length === 0 && parsed.applicableRows > 0
+
+  const onApply = () => {
+    const stats = applyParsedRows(parsed.rows, { setCellValue, setPhf, setHvPct })
+    setApplied(stats)
+  }
+
+  return (
+    <div className="di-modal-backdrop" onMouseDown={onClose}>
+      <div
+        className="di-modal di-paste-modal"
+        role="dialog"
+        aria-modal="true"
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        <div className="di-modal__header">
+          <h2 className="di-modal__title">Bulk paste volumes</h2>
+        </div>
+
+        <div className="di-modal__body">
+          {applied ? (
+            <div className="di-banner">
+              Applied {applied.cells} value{applied.cells === 1 ? '' : 's'} across{' '}
+              {applied.intersections} intersection{applied.intersections === 1 ? '' : 's'}.
+              Pasted values are tagged as manual entries in the grid.
+            </div>
+          ) : (
+            <>
+              <p className="di-paste__hint">
+                Paste rows copied from Excel / Google Sheets. The first row must be a
+                header. Match columns by name — <code>Int#</code> and <code>Period</code>{' '}
+                are required; movement columns are any of{' '}
+                <code>{MOVEMENT_CODES.join(', ')}</code>; <code>PHF</code> and{' '}
+                <code>HV</code> are optional. Blank cells are left untouched.
+              </p>
+              <button
+                type="button"
+                className="di-paste__template"
+                onClick={() => setText((t) => (t ? t : PASTE_TEMPLATE + '\n'))}
+              >
+                Insert header template
+              </button>
+              <textarea
+                className="di-paste__textarea"
+                placeholder={PASTE_TEMPLATE + '\n1\tAM\t37\t1898\t20\t…'}
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+                rows={6}
+                spellCheck={false}
+              />
+
+              {parsed.errors.length > 0 && (
+                <div className="di-paste__errors">
+                  {parsed.errors.map((e, i) => (
+                    <div key={i} className="di-paste__err">⚠ {e}</div>
+                  ))}
+                </div>
+              )}
+
+              {text.trim() && parsed.errors.length === 0 && (
+                <div className="di-paste__preview">
+                  <div className="di-paste__preview-meta">
+                    {parsed.applicableRows} row{parsed.applicableRows === 1 ? '' : 's'} ready ·{' '}
+                    {parsed.applicableCells} cell{parsed.applicableCells === 1 ? '' : 's'}
+                    {rowErrors > 0 && <span className="di-paste__count-err"> · {rowErrors} error{rowErrors === 1 ? '' : 's'}</span>}
+                    {rowWarnings > 0 && <span className="di-paste__count-warn"> · {rowWarnings} warning{rowWarnings === 1 ? '' : 's'}</span>}
+                  </div>
+                  <table className="di-paste__table">
+                    <thead>
+                      <tr><th>Int</th><th>Period</th><th>Cells</th><th>Status</th></tr>
+                    </thead>
+                    <tbody>
+                      {parsed.rows.map((r, i) => {
+                        const bad = r.errors.length > 0
+                        const warn = !bad && r.warnings.length > 0
+                        return (
+                          <tr key={i} className={bad ? 'di-paste__tr--err' : warn ? 'di-paste__tr--warn' : ''}>
+                            <td>{r.intName ? `${r.intNum} — ${r.intName}` : (r.intNum || '?')}</td>
+                            <td>{r.period || '?'}</td>
+                            <td>{Object.keys(r.cells).length}</td>
+                            <td className="di-paste__status">
+                              {bad
+                                ? r.errors[0]
+                                : warn
+                                  ? r.warnings[0]
+                                  : '✓ ready'}
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+
+        <div className="di-modal__footer">
+          {applied ? (
+            <button type="button" className="di-btn-primary" onClick={onClose}>Done</button>
+          ) : (
+            <>
+              <button type="button" className="di-btn-secondary" onClick={onClose}>Cancel</button>
+              <button
+                type="button"
+                className="di-btn-primary"
+                disabled={!canApply}
+                onClick={onApply}
+                title={canApply ? '' : 'Fix header errors and add at least one valid row'}
+              >
+                Apply {parsed.applicableRows > 0 ? `(${parsed.applicableRows})` : ''}
+              </button>
+            </>
+          )}
+        </div>
+      </div>
     </div>
   )
 }

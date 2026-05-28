@@ -568,3 +568,110 @@
   cursor: pointer;
 }
 .di-vol-unm__apply:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* ─── Stage 10.3: bulk paste/import ──────────────────────────────────────── */
+.di-s4__paste-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+}
+.di-s4__paste-or {
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+.di-s4__paste-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 14px;
+  font-size: 13px;
+}
+
+/* Paste modal — wider than the default 560px to fit the preview table */
+.di-paste-modal { width: 720px; }
+.di-paste__hint {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+.di-paste__hint code {
+  font-size: 11px;
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.06);
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+.di-paste__template {
+  align-self: flex-start;
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  color: var(--text-secondary);
+  font-size: 11px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.di-paste__template:hover { color: var(--text-primary); border-color: var(--accent); }
+.di-paste__textarea {
+  width: 100%;
+  resize: vertical;
+  background: var(--bg-base);
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  color: var(--text-primary);
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 10px 12px;
+  white-space: pre;
+  overflow-x: auto;
+}
+.di-paste__textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-glow);
+}
+.di-paste__errors {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.di-paste__err {
+  font-size: 12px;
+  color: #FF8B8B;
+}
+.di-paste__preview-meta {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+}
+.di-paste__count-err { color: #FF8B8B; }
+.di-paste__count-warn { color: #FFB454; }
+.di-paste__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.di-paste__table th {
+  text-align: left;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-tertiary);
+  font-weight: 500;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+}
+.di-paste__table td {
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-primary);
+}
+.di-paste__status { color: var(--text-secondary); }
+.di-paste__tr--err td { background: rgba(255, 107, 107, 0.06); }
+.di-paste__tr--err .di-paste__status { color: #FF8B8B; }
+.di-paste__tr--warn td { background: rgba(255, 180, 84, 0.06); }
+.di-paste__tr--warn .di-paste__status { color: #FFB454; }
