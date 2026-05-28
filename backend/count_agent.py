@@ -80,15 +80,40 @@ def load_examples():
     _examples_cache = examples
     return examples
 
-def select_examples(file_content, n=NUM_EXAMPLES_PER_CALL):
-    """Pick best reference examples for the current file."""
+def _normalize_vendor(name):
+    """Map a free-text vendor hint to the canonical label used in
+    training_data.jsonl's vendor_detected field. Accepts e.g.
+    'GRAM Traffic' → 'GRAM', 'pape dawson' → 'Pape-Dawson'."""
+    if not name:
+        return None
+    n = str(name).strip().lower()
+    if 'nds' in n or 'national data' in n:
+        return 'NDS'
+    if 'quality' in n:
+        return 'Quality Counts'
+    if 'counts unlimited' in n:
+        return 'Counts Unlimited'
+    if 'gram' in n:
+        return 'GRAM'
+    if 'pape' in n:
+        return 'Pape-Dawson'
+    return name  # pass through unknown vendors verbatim
+
+def select_examples(file_content, n=NUM_EXAMPLES_PER_CALL, vendor_hint=None):
+    """Pick best reference examples for the current file.
+
+    vendor_hint: an explicit vendor name (from a caller that already knows
+    the vendor — e.g. the labeling harness processing a known-vendor PDF
+    batch). When given it OVERRIDES the text sniff, which is the only way
+    image PDFs (whose sniff text is empty) can get vendor-matched examples.
+    """
     examples = load_examples()
     if not examples:
         return []
 
-    # Quick vendor sniff from file content (only works for text — images skip this)
-    likely_vendor = None
-    if isinstance(file_content, str) and file_content:
+    # Explicit hint wins; otherwise sniff vendor from text content.
+    likely_vendor = _normalize_vendor(vendor_hint)
+    if not likely_vendor and isinstance(file_content, str) and file_content:
         content_lower = file_content[:5000].lower()
         if 'national data' in content_lower or 'NL\tNT\tNR\tNU' in file_content:
             likely_vendor = 'NDS'
@@ -390,7 +415,14 @@ intersections, return 9 blocks; if it has 1, return 1.
 }"""
 
 # ── CLAUDE CALL ───────────────────────────────────────────────────────────────
-def extract(filepath, api_key):
+def extract(filepath, api_key, vendor_hint=None):
+    """Extract a count file via Claude.
+
+    vendor_hint: optional explicit vendor name. Forwarded to
+    select_examples so image PDFs (whose text sniff is empty) still get
+    vendor-matched reference examples. Backward-compatible — callers that
+    omit it keep the prior text-sniff behavior.
+    """
     content, ftype, file_warnings = read_file(filepath)
 
     # Handle errors from text readers
@@ -399,7 +431,7 @@ def extract(filepath, api_key):
 
     # Select reference examples (using empty string for image inputs)
     sniff_text = content if isinstance(content, str) else ""
-    examples = select_examples(sniff_text)
+    examples = select_examples(sniff_text, vendor_hint=vendor_hint)
     examples_block = format_examples_for_prompt(examples)
     full_system = SYSTEM_PROMPT + examples_block
 
