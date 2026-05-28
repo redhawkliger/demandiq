@@ -526,14 +526,22 @@ function ResultsPanel({ lastRun, intersections }) {
           </div>
         ) : (
           <ul className="di-s6-qc__list">
-            {qcFlags.map((f, i) => (
-              <li key={i} className="di-s6-qc__item">
-                <span className="di-s6-qc__chip">
-                  {f.check}{f.period ? ` · ${f.period}` : ''}
-                </span>
-                <span className="di-s6-qc__msg">{f.message}</span>
-              </li>
-            ))}
+            {qcFlags.map((f, i) => {
+              const isFractional = f.check === 'FRACTIONAL-VOLUME'
+              return (
+                <li
+                  key={i}
+                  className={`di-s6-qc__item${isFractional ? ' di-s6-qc__item--fractional' : ''}`}
+                >
+                  <span
+                    className={`di-s6-qc__chip${isFractional ? ' di-s6-qc__chip--fractional' : ''}`}
+                  >
+                    {f.check}{f.period ? ` · ${f.period}` : ''}
+                  </span>
+                  <span className="di-s6-qc__msg">{f.message}</span>
+                </li>
+              )
+            })}
           </ul>
         )}
       </Collapsible>

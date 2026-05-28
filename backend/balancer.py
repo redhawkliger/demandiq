@@ -930,6 +930,44 @@ def _build_link_modes(links, coords=None):
     return out
 
 
+def fractional_volume_flags(raw_volumes, period=None, eps=1e-6):
+    """Stage 10.1 — source-data QC: flag RAW movement values that aren't
+    whole numbers (the fractional data-entry bug). This is a read-only
+    check on raw inputs, run BEFORE balancing — NOT a balancing check.
+
+    eps tolerates float-representation noise (e.g. 100.0000001 is treated
+    as 100). bool is excluded (True/False are ints in Python but never a
+    legitimate volume).
+
+    Args:
+        raw_volumes: { int_num: { movement: value } }
+        period:      optional 'AM'|'PM' — baked into the message + 'period'
+                     key when provided.
+
+    Returns: list of {'check','int','message'[,'period']} dicts.
+    """
+    flags = []
+    for int_num in sorted(raw_volumes.keys()):
+        vols = raw_volumes[int_num] or {}
+        for mv in sorted(vols.keys()):
+            value = vols[mv]
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                continue
+            if abs(value - round(value)) > eps:
+                pstr = f" ({period})" if period else ""
+                flag = {
+                    'check': 'FRACTIONAL-VOLUME',
+                    'int': int_num,
+                    'message': (f"Int {int_num} {mv}{pstr}: raw value {value} "
+                                f"is not a whole number — likely a data-entry "
+                                f"error. Verify the source count."),
+                }
+                if period:
+                    flag['period'] = period
+                flags.append(flag)
+    return flags
+
+
 def balance_nchrp(
     raw_volumes,
     links,

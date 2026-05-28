@@ -10,6 +10,7 @@ from balancer import (
     intersection_targets,
     furness_intersection,
     balance_nchrp,
+    fractional_volume_flags,
     _build_links_by_int,
     _build_matrix,
     _extract_matrix,
@@ -461,6 +462,36 @@ def test_all_movements_present():
     print(f"  test_all_movements_present: PASS ({len(review)} entries cover every raw>0 movement)")
 
 
+# ─── Test 11 — Stage 10.1: fractional-volume source-data QC flag ───────────
+def test_fractional_volume_flag():
+    """A raw value with a fractional part fires FRACTIONAL-VOLUME for exactly
+    that movement; an all-integer raw set fires zero fractional flags; tiny
+    float noise within epsilon is NOT flagged."""
+    raw = {
+        1: {'EBT': 1000, 'EBL': 80, 'WBT': 102.5},   # WBT fractional
+        2: {'EBT': 950, 'NBL': 30},                  # all integer
+    }
+    flags = fractional_volume_flags(raw, period='AM')
+    assert len(flags) == 1, f"expected exactly 1 flag, got {len(flags)}: {flags}"
+    f = flags[0]
+    assert f['check'] == 'FRACTIONAL-VOLUME'
+    assert f['int'] == 1 and f['period'] == 'AM'
+    assert 'WBT' in f['message'] and '102.5' in f['message'], f['message']
+
+    # All-integer raw → zero fractional flags
+    clean = {1: {'EBT': 1000, 'EBL': 80}, 2: {'WBT': 950.0}}  # 950.0 is whole
+    assert fractional_volume_flags(clean) == [], fractional_volume_flags(clean)
+
+    # Float-representation noise within epsilon → not flagged
+    noisy = {1: {'EBT': 100.0000001}}
+    assert fractional_volume_flags(noisy) == [], "epsilon should absorb float noise"
+
+    # Genuine fraction just above epsilon → flagged
+    assert len(fractional_volume_flags({1: {'EBT': 100.01}})) == 1
+
+    print(f"  test_fractional_volume_flag: PASS (1 flag on WBT 102.5, 0 on clean)")
+
+
 if __name__ == '__main__':
     tests = [
         test_furness_4x4_known_answer,
@@ -473,6 +504,7 @@ if __name__ == '__main__':
         test_link_conservation_holds,
         test_movements_review_present,
         test_all_movements_present,
+        test_fractional_volume_flag,
     ]
     passed = 0
     failed = 0

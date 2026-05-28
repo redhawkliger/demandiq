@@ -31,7 +31,7 @@ from openpyxl.styles import Font, Alignment, PatternFill
 
 from count_agent import extract, MOVEMENTS
 from balancer import balance_corridor, run_qc
-from balancer import balance_nchrp
+from balancer import balance_nchrp, fractional_volume_flags
 from line_diagram import render_single_diagram, VIEW_MODES, FIG_INCHES, DPI
 from excel_export import build_workbook
 
@@ -413,6 +413,10 @@ async def balance_nchrp_endpoint(payload: dict):
 
     # Tag QC flags by period
     qc_all = []
+    # Stage 10.1: source-data fractional-volume warnings (read-only check on
+    # RAW inputs, before balancing). Surfaced alongside the NCHRP-* flags.
+    qc_all += fractional_volume_flags(am_raw, period='AM')
+    qc_all += fractional_volume_flags(pm_raw, period='PM')
     for f in am_result['qc_flags']:
         qc_all.append({**f, 'period': 'AM'})
     for f in pm_result['qc_flags']:

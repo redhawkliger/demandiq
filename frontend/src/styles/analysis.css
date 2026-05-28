@@ -459,6 +459,16 @@
   flex-shrink: 0;
   margin-top: 1px;
 }
+/* Stage 10.1: fractional-volume source-data warnings — distinct amber tone
+ * so they read as "verify the count" rather than a balancing failure. */
+.di-s6-qc__item--fractional {
+  background: rgba(255, 159, 10, 0.08);
+  border-left-color: rgba(255, 159, 10, 0.7);
+}
+.di-s6-qc__chip--fractional {
+  background: rgba(255, 159, 10, 0.22);
+  color: #FFB454;
+}
 .di-s6-qc__msg { color: var(--text-secondary); line-height: 1.45; }
 .di-s6-qc__empty {
   font-size: 12px;
