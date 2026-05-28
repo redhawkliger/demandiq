@@ -35,9 +35,19 @@ HDR_FONT  = Font(name='Arial', bold=True, color='FFFFFF', size=10)
 SUB_FILL  = PatternFill('solid', fgColor='CFD8DC')
 SUB_FONT  = Font(name='Arial', bold=True, color='000000', size=10)
 DATA_FONT = Font(name='Arial', color='000000', size=10)
+# Combined View: red text for a negative delta (movement dropped below raw);
+# light fill marks an engineer override (matches the "*" suffix convention).
+NEG_FONT  = Font(name='Arial', color='C00000', size=10)
+OVR_FILL  = PatternFill('solid', fgColor='FFF2CC')
 
 CENTER = Alignment(horizontal='center', vertical='center', wrap_text=True)
 LEFT   = Alignment(horizontal='left',   vertical='center')
+
+# Standard L/T/R movement order (no U-turns) for the Combined View.
+COMBINED_MOVEMENTS = (
+    'EBL', 'EBT', 'EBR', 'WBL', 'WBT', 'WBR',
+    'NBL', 'NBT', 'NBR', 'SBL', 'SBT', 'SBR',
+)
 
 _THIN = Side(style='thin', color='AAAAAA')
 BORDER = Border(left=_THIN, right=_THIN, top=_THIN, bottom=_THIN)
@@ -341,6 +351,118 @@ def _write_adjustments(ws, last_run):
     ws.freeze_panes = 'A2'
 
 
+# ── Combined View (Stage 10.2) ─────────────────────────────────────────────────
+def _raw_value(it, period, key):
+    """Raw count for a movement — strips the {value, _source} wrapper."""
+    cell = ((it.get('volumes') or {}).get(period) or {}).get(key)
+    if isinstance(cell, dict):
+        return cell.get('value')
+    return cell
+
+
+def _final_value(it, period, key, period_overrides):
+    """FINAL value = engineer override if present, else balanced. Mirrors the
+    finalVolumeFor logic used across the app. Returns (value, is_override)."""
+    int_overrides = (period_overrides or {}).get(str(it.get('num', ''))) or {}
+    if key in int_overrides:
+        return int_overrides[key], True
+    bal = ((it.get('balanced') or {}).get(period) or {}).get(key)
+    return bal, False
+
+
+def _movement_present(it, key):
+    """True if the L/T/R movement is active at this intersection (its approach
+    exists and the movement letter is in the lane config)."""
+    direction, mv = key[:2], key[2]
+    active = _active_movements((it.get('approaches') or {}).get(direction))
+    return mv in active
+
+
+def _write_combined_view(wb, intersections, overrides):
+    """Stage 10.2: raw + balanced (final) side-by-side, per intersection.
+    Columns: Movement | AM Raw | AM Balanced | AM Δ | PM Raw | PM Balanced | PM Δ.
+    Δ = Balanced − Raw (red when negative). Override balanced cells carry a
+    light fill + "*" suffix. Each section ends in a TOTAL subtotal row."""
+    ws = wb.create_sheet('Combined View')
+    headers = ['Movement', 'AM Raw', 'AM Balanced', 'AM Δ',
+               'PM Raw', 'PM Balanced', 'PM Δ']
+    for col, label in enumerate(headers, start=1):
+        _style_header(ws.cell(row=1, column=col, value=label))
+
+    am_ovr = overrides.get('AM') or {}
+    pm_ovr = overrides.get('PM') or {}
+
+    r = 2
+    for it in intersections:
+        # Intersection header row — bold, merged across all 7 columns.
+        label = f"Int {it.get('num', '')} — {it.get('name', '')}".strip(' —')
+        hc = ws.cell(row=r, column=1, value=label)
+        hc.fill = HDR_FILL
+        hc.font = HDR_FONT
+        hc.alignment = LEFT
+        for c in range(1, 8):
+            ws.cell(row=r, column=c).border = BORDER
+        ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=7)
+        r += 1
+
+        # Per-period running subtotals: [raw, bal, delta]
+        sums = {'AM': [0, 0, 0], 'PM': [0, 0, 0]}
+
+        for key in COMBINED_MOVEMENTS:
+            if not _movement_present(it, key):
+                continue
+            _style_data(ws.cell(row=r, column=1, value=key), align=LEFT)
+
+            col = 2
+            for period, ovr in (('AM', am_ovr), ('PM', pm_ovr)):
+                raw = _raw_value(it, period, key)
+                bal, is_ovr = _final_value(it, period, key, ovr)
+                raw_n = raw if isinstance(raw, (int, float)) else 0
+                bal_n = bal if isinstance(bal, (int, float)) else 0
+                delta = bal_n - raw_n
+                sums[period][0] += raw_n
+                sums[period][1] += bal_n
+                sums[period][2] += delta
+
+                # Raw
+                _style_data(ws.cell(row=r, column=col, value=raw), fmt='0')
+                # Balanced (override → "*" suffix as text + light fill)
+                bcell = ws.cell(row=r, column=col + 1)
+                if is_ovr and bal is not None:
+                    bcell.value = f"{bal}*"
+                    _style_data(bcell, align=CENTER)
+                    bcell.fill = OVR_FILL
+                else:
+                    bcell.value = bal
+                    _style_data(bcell, fmt='0')
+                # Δ (red text when negative)
+                dcell = ws.cell(row=r, column=col + 2, value=delta)
+                _style_data(dcell, fmt='+0;-0;0')
+                if delta < 0:
+                    dcell.font = NEG_FONT
+                col += 3
+            r += 1
+
+        # TOTAL subtotal row
+        _style_subheader(ws.cell(row=r, column=1, value='TOTAL'))
+        col = 2
+        for period in ('AM', 'PM'):
+            for i in range(3):
+                tcell = ws.cell(row=r, column=col + i, value=sums[period][i])
+                _style_subheader(tcell)
+                if i == 2:  # delta column
+                    tcell.number_format = '+0;-0;0'
+                else:
+                    tcell.number_format = '0'
+            col += 3
+        r += 2  # subtotal + spacer
+
+    ws.freeze_panes = 'A2'
+    ws.column_dimensions['A'].width = 14
+    for c in range(2, 8):
+        ws.column_dimensions[get_column_letter(c)].width = 13
+
+
 # ── Public API ───────────────────────────────────────────────────────────────
 def _write_overrides(wb, intersections, overrides):
     """Stage 5: Engineer Overrides sheet. One row per overridden cell.
@@ -417,6 +539,8 @@ def build_workbook(project_state):
     _write_volume_sheet(wb.create_sheet(), 'PM Unbalanced', intersections, 'PM', balanced=False)
     _write_volume_sheet(wb.create_sheet(), 'PM Balanced',   intersections, 'PM', balanced=True,
                         overrides=overrides.get('PM') or {})
+    # Stage 10.2: raw + balanced side-by-side with deltas
+    _write_combined_view(wb, intersections, overrides)
     _write_convergence(wb.create_sheet(),  last_run)
     _write_qc(wb.create_sheet(),           last_run)
     _write_adjustments(wb.create_sheet(),  last_run)

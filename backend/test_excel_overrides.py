@@ -101,10 +101,78 @@ def test_export_omits_overrides_sheet_when_empty():
     print(f"  test_export_omits_overrides_sheet_when_empty: PASS")
 
 
+def test_combined_view_sheet():
+    """Stage 10.2 — Combined View sheet: 7 columns, Δ = Bal − Raw, and
+    override balanced cells carry the "*" marker."""
+    project_state = {
+        'project': {'name': 'Test', 'analysisPeriods': ['AM', 'PM']},
+        'intersections': [{
+            'num': 3,
+            'name': 'Main St & 1st Ave',
+            'approaches': {
+                'EB': {'exists': True, 'lanes': [{'movement': 'LTR'}]},
+                'WB': {'exists': True, 'lanes': [{'movement': 'LTR'}]},
+                'NB': {'exists': True, 'lanes': [{'movement': 'LTR'}]},
+                'SB': {'exists': True, 'lanes': [{'movement': 'LTR'}]},
+            },
+            'volumes': {
+                'AM': {'EBT': {'value': 1000}, 'EBL': {'value': 80}},
+                'PM': {'EBT': {'value': 1200}},
+            },
+            'balanced': {
+                'AM': {'EBT': 1050, 'EBL': 60},   # EBL dropped 80→60
+                'PM': {'EBT': 1200},
+            },
+        }],
+        'balancing': {'overrides': {'AM': {'3': {'EBT': 1000}}, 'PM': {}}},
+        'analysis': {'lastRun': {'qcFlags': []}},
+    }
+
+    xlsx_bytes = build_workbook(project_state)
+    wb = load_workbook(io.BytesIO(xlsx_bytes), data_only=True)
+
+    assert 'Combined View' in wb.sheetnames, wb.sheetnames
+    ws = wb['Combined View']
+
+    # 7-column header
+    expected = ['Movement', 'AM Raw', 'AM Balanced', 'AM Δ', 'PM Raw', 'PM Balanced', 'PM Δ']
+    actual = [ws.cell(row=1, column=c).value for c in range(1, 8)]
+    assert actual == expected, f"header mismatch: {actual}"
+
+    # Find the EBL data row (raw 80, balanced 60 → Δ -20)
+    ebl_row = None
+    ebt_row = None
+    for r in range(2, ws.max_row + 1):
+        v = ws.cell(row=r, column=1).value
+        if v == 'EBL':
+            ebl_row = r
+        elif v == 'EBT':
+            ebt_row = r
+    assert ebl_row, "EBL row not found"
+    am_raw = ws.cell(row=ebl_row, column=2).value
+    am_bal = ws.cell(row=ebl_row, column=3).value
+    am_delta = ws.cell(row=ebl_row, column=4).value
+    assert am_raw == 80, am_raw
+    assert am_bal == 60, am_bal
+    assert am_delta == am_bal - am_raw == -20, am_delta
+    print(f"  EBL row: raw={am_raw} bal={am_bal} Δ={am_delta}")
+
+    # EBT AM is overridden (1050 balanced → 1000 override) → "*" marker on balanced
+    ebt_am_bal = ws.cell(row=ebt_row, column=3).value
+    assert ebt_am_bal == '1000*', f"expected '1000*' override marker; got {ebt_am_bal!r}"
+    print(f"  EBT AM override marker: {ebt_am_bal!r}")
+
+    # TOTAL subtotal row present for the section
+    totals = [ws.cell(row=r, column=1).value for r in range(2, ws.max_row + 1)]
+    assert 'TOTAL' in totals, "TOTAL subtotal row missing"
+    print(f"  test_combined_view_sheet: PASS")
+
+
 if __name__ == '__main__':
     tests = [
         test_export_honors_overrides,
         test_export_omits_overrides_sheet_when_empty,
+        test_combined_view_sheet,
     ]
     passed = 0; failed = 0
     for t in tests:
