@@ -233,11 +233,16 @@ def _dg_stop_sign(ax, ap, cx, cy):
 
 
 # ── Cell + approach drawing ────────────────────────────────────────────────────
-def _dg_draw_approach(ax, ap, cx, cy, u_vols, b_vols, p, label_fn):
+def _dg_draw_approach(ax, ap, cx, cy, u_vols, b_vols, p, label_fn, overrides=None):
     """Draw 3 arrows + volume labels for one approach using preset p.
 
     label_fn: callable(u_int, b_int) → (text_str, color_hex). Determines what
     each volume label says and what colour it's drawn in.
+
+    Stage 5: `overrides` is an optional {movement_key: value} dict for this
+    intersection's period. When a key is overridden, `b` is replaced with
+    the override value AND the label gets a "*" suffix so engineer
+    interventions are spottable at a glance.
     """
     s   = p['s']
     sp  = s * DG_SP_F
@@ -248,6 +253,7 @@ def _dg_draw_approach(ax, ap, cx, cy, u_vols, b_vols, p, label_fn):
     vns = s * DG_VOL_NS
     vew = s * DG_VOL_EW
     fs  = p['fs_vol']
+    overrides = overrides or {}
 
     for mv, ax_, ay_ in lanes:
         points = _dg_get_arrow(ap, mv, ax_, ay_, s)
@@ -257,7 +263,12 @@ def _dg_draw_approach(ax, ap, cx, cy, u_vols, b_vols, p, label_fn):
         key = f"{ap}{mv}"
         u = int(u_vols.get(key, 0) or 0)
         b = int(b_vols.get(key, 0) or 0)
+        is_overridden = key in overrides
+        if is_overridden:
+            b = int(overrides[key] or 0)
         lbl, color = label_fn(u, b)
+        if is_overridden:
+            lbl = f"{lbl}*"
         if ap == 'NB':
             ax.text(ax_, ay_ - vns, lbl, fontsize=fs, color=color,
                     rotation=90, ha='center', va='top', zorder=10)
@@ -333,7 +344,7 @@ def _fit_street_label(text, base_fs, fig_inches, max_text_extent, min_fs=6.0):
     return '\n'.join(wrapped), round(fs, 1)
 
 
-def _dg_draw_cell(ax, geo, u_vols, b_vols, p, label_fn):
+def _dg_draw_cell(ax, geo, u_vols, b_vols, p, label_fn, overrides=None):
     """Draw one full intersection cell into `ax` using preset p."""
     active  = geo.get('active_legs', ['NB', 'SB', 'EB', 'WB'])
     control = geo.get('control', 'Signalized')
@@ -395,7 +406,7 @@ def _dg_draw_cell(ax, geo, u_vols, b_vols, p, label_fn):
         if 'WB' in active: ax.text(cx + arm * 0.70, cy - 0.044, ew_text, fontsize=ew_fs, **nk_common)
 
     for ap in active:
-        _dg_draw_approach(ax, ap, cx, cy, u_vols, b_vols, p, label_fn)
+        _dg_draw_approach(ax, ap, cx, cy, u_vols, b_vols, p, label_fn, overrides)
 
     # Number badge top-left + name banner top-center
     ax.add_patch(MplCircle((0.082, 0.922), 0.048, facecolor=DG_WHITE,
@@ -433,8 +444,15 @@ FIG_INCHES = 4.0
 DPI = 150
 
 
-def render_single_diagram(intersection_geo, u_vols, b_vols, view_mode='combined'):
+def render_single_diagram(intersection_geo, u_vols, b_vols, view_mode='combined', overrides=None):
     """Render one intersection as a PNG.
+
+    Args:
+      intersection_geo, u_vols, b_vols, view_mode: as before.
+      overrides: optional dict {movement_key: value} of engineer overrides for
+                 this intersection in the period being rendered. When provided,
+                 each overridden movement's balanced value is replaced and the
+                 label gets a "*" suffix so reviewers can spot interventions.
 
     Returns: bytes (PNG data).
     Raises:  ValueError on unknown view_mode.
@@ -445,7 +463,7 @@ def render_single_diagram(intersection_geo, u_vols, b_vols, view_mode='combined'
     fig = plt.figure(figsize=(FIG_INCHES, FIG_INCHES), facecolor=DG_WHITE)
     ax = fig.add_subplot(1, 1, 1)
     fig.subplots_adjust(left=0, right=1, top=1, bottom=0)
-    _dg_draw_cell(ax, intersection_geo, u_vols or {}, b_vols or {}, p, label_fn)
+    _dg_draw_cell(ax, intersection_geo, u_vols or {}, b_vols or {}, p, label_fn, overrides or {})
 
     buf = io.BytesIO()
     fig.savefig(buf, format='png', dpi=DPI, facecolor=DG_WHITE)

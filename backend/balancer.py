@@ -1164,6 +1164,50 @@ def compute_link_conservation(balanced, resolved_links, link_modes=None):
     return out
 
 
+def compute_movements_review(raw_volumes, balanced):
+    """Stage 5 (amendment v2): enumerate EVERY standard 12-movement entry at
+    every intersection — including movements where balanced >= raw. The
+    Review UI surfaces all values for engineer review; drops (balanced<raw)
+    are visually highlighted by the frontend, not gated server-side.
+
+    Args:
+        raw_volumes: { int_num: { movement: value } }
+        balanced:    { int_num: { movement: value } }  (post-round-up-5)
+
+    Returns: list of dicts, one entry per (int_num, movement) pair, sorted
+    by int_num asc then movement in standard L/T/R order. Movements with
+    raw == 0 are skipped (no engineering meaning at a missing-leg cell).
+        {
+          'int_num': int, 'movement': str,
+          'raw': int, 'balanced': int, 'delta': int,   # delta = balanced - raw
+        }
+    U-turns are excluded (passed through unchanged by IPF).
+    """
+    standard_movements = (
+        'EBL', 'EBT', 'EBR',
+        'WBL', 'WBT', 'WBR',
+        'NBL', 'NBT', 'NBR',
+        'SBL', 'SBT', 'SBR',
+    )
+    out = []
+    for int_num in sorted(raw_volumes.keys()):
+        raw = raw_volumes[int_num]
+        bal = balanced.get(int_num, {})
+        for mv in standard_movements:
+            r = int(raw.get(mv, 0) or 0)
+            b = int(bal.get(mv, 0) or 0)
+            if r <= 0:
+                continue
+            out.append({
+                'int_num': int_num,
+                'movement': mv,
+                'raw': r,
+                'balanced': b,
+                'delta': b - r,
+            })
+    return out
+
+
 def _build_link_modes(links, coords=None):
     """Build {(u, d, direction): mode} mapping from a link list. Mirrors the
     geographic ordering used in resolve_link_volumes and _build_links_by_int."""
@@ -1498,10 +1542,13 @@ def balance_nchrp(
                 ),
             })
 
+    movements_review = compute_movements_review(raw_volumes, balanced)
+
     return {
         'balanced': balanced,
         'resolved_links': resolved,
         'link_conservation': link_conservation,
+        'movements_review': movements_review,
         'qc_flags': qc_flags,
         'iterations': iterations,
         'converged': converged_map,

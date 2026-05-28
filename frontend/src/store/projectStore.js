@@ -345,6 +345,61 @@ export function setBalancing(partial) {
   _emit()
 }
 
+// ── Stage 5: per-cell engineer overrides ──────────────────────────────────────
+// Shape: balancing.overrides = { AM: {intNumStr: {movement: number}}, PM: {...} }
+// Overrides are LOCAL — they replace the post-balance value for that cell in
+// every downstream view (Link Conservation Table, Excel export, line diagrams)
+// but do NOT trigger re-balancing or any cascade.
+export function getOverrides() {
+  return getSnapshot().balancing?.overrides ?? { AM: {}, PM: {} }
+}
+
+export function setOverride(period, intNum, movement, value) {
+  if (!_initialized) _initSnapshot()
+  const cur = _snapshot.balancing ?? {}
+  const overrides = { AM: {}, PM: {}, ...(cur.overrides ?? {}) }
+  const periodMap = { ...(overrides[period] ?? {}) }
+  const intMap = { ...(periodMap[String(intNum)] ?? {}) }
+  intMap[movement] = value
+  periodMap[String(intNum)] = intMap
+  overrides[period] = periodMap
+  _snapshot = { ..._snapshot, balancing: { ...cur, overrides } }
+  _persist()
+  _emit()
+}
+
+export function clearOverride(period, intNum, movement) {
+  if (!_initialized) _initSnapshot()
+  const cur = _snapshot.balancing ?? {}
+  const overrides = { AM: {}, PM: {}, ...(cur.overrides ?? {}) }
+  const periodMap = { ...(overrides[period] ?? {}) }
+  const intMap = { ...(periodMap[String(intNum)] ?? {}) }
+  delete intMap[movement]
+  if (Object.keys(intMap).length === 0) {
+    delete periodMap[String(intNum)]
+  } else {
+    periodMap[String(intNum)] = intMap
+  }
+  overrides[period] = periodMap
+  _snapshot = { ..._snapshot, balancing: { ...cur, overrides } }
+  _persist()
+  _emit()
+}
+
+export function clearAllOverrides() {
+  if (!_initialized) _initSnapshot()
+  const cur = _snapshot.balancing ?? {}
+  _snapshot = { ..._snapshot, balancing: { ...cur, overrides: { AM: {}, PM: {} } } }
+  _persist()
+  _emit()
+}
+
+// Clamp a single movement at one intersection to its raw collected value.
+// Convenience for the "Clamp all visible to raw" bulk action.
+export function clampOverrideToRaw(period, intNum, movement, rawValue) {
+  setOverride(period, intNum, movement, rawValue)
+}
+
 export function setLinkBalanceMode(linkId, mode, threshold) {
   if (!_initialized) _initSnapshot()
   const cur = _snapshot.balancing ?? {}

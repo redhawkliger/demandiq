@@ -444,6 +444,10 @@ async def balance_nchrp_endpoint(payload: dict):
             "AM": am_result['link_conservation'],
             "PM": pm_result['link_conservation'],
         },
+        "movements_review": {
+            "AM": am_result['movements_review'],
+            "PM": pm_result['movements_review'],
+        },
         "qc_flags": qc_all,
         "method": method,
     }
@@ -659,6 +663,13 @@ async def line_diagram_endpoint(payload: dict):
     if not isinstance(u_vols, dict) or not isinstance(b_vols, dict):
         raise HTTPException(status_code=400, detail="u_vols and b_vols must be dicts")
 
+    # Stage 5: optional per-cell engineer overrides for this intersection +
+    # period. Shape: {movement_key: number_value}. Replaces b_vols value for
+    # that cell and adds "*" suffix to the rendered label.
+    overrides = payload.get("overrides", {}) or {}
+    if not isinstance(overrides, dict):
+        raise HTTPException(status_code=400, detail="overrides must be a dict")
+
     view_mode = payload.get("view_mode", "combined")
     if view_mode not in VIEW_MODES:
         raise HTTPException(
@@ -667,7 +678,8 @@ async def line_diagram_endpoint(payload: dict):
         )
 
     try:
-        png_bytes = render_single_diagram(intersection, u_vols, b_vols, view_mode)
+        png_bytes = render_single_diagram(intersection, u_vols, b_vols, view_mode,
+                                          overrides=overrides)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"render failed: {e}")
 

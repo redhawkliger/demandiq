@@ -139,12 +139,16 @@ def _write_project_info(ws, state):
     ws.column_dimensions['B'].width = 50
 
 
-def _write_volume_sheet(ws, title, intersections, period, balanced):
+def _write_volume_sheet(ws, title, intersections, period, balanced, overrides=None):
     """Write a volume sheet (16 movement cols + PHF + HV%).
 
     `balanced=True` reads intersection.balanced[period]; False reads
     .volumes[period] and strips the {value, _source} wrapper.
+    Stage 5: when `balanced=True`, applies engineer overrides (if provided)
+    on top of the balanced values. Overridden cells get a "*" suffix on
+    their displayed value so reviewers can spot interventions at a glance.
     """
+    overrides = overrides or {}
     ws.title = title
 
     # ── Row 1: direction group headers + spacer cells ────────────────
@@ -186,6 +190,8 @@ def _write_volume_sheet(ws, title, intersections, period, balanced):
             period_data = (it.get('balanced') or {}).get(period) or {}
         else:
             period_data = (it.get('volumes') or {}).get(period) or {}
+        # Stage 5: per-intersection override dict for this period
+        int_overrides = overrides.get(str(it.get('num', ''))) or {}
 
         col = 3
         for d in ALL_DIRS:
@@ -199,7 +205,20 @@ def _write_volume_sheet(ws, title, intersections, period, balanced):
                         val = raw.get('value')
                     else:                            # balanced plain value
                         val = raw
+                    # Stage 5: apply engineer override if present (balanced only)
+                    is_overridden = False
+                    if balanced and key in int_overrides:
+                        val = int_overrides[key]
+                        is_overridden = True
                     if val is not None:
+                        # Marker suffix on overridden cells — written as text so
+                        # the "*" is preserved (otherwise openpyxl would coerce
+                        # numeric to value-only)
+                        if is_overridden:
+                            cell.value = f"{val}*"
+                            _style_data(cell, align=None)
+                            col += 1
+                            continue
                         cell.value = val
                 # Style cell whether active or not — keeps the grid even.
                 _style_data(cell, fmt='0')
@@ -323,6 +342,62 @@ def _write_adjustments(ws, last_run):
 
 
 # ── Public API ───────────────────────────────────────────────────────────────
+def _write_overrides(wb, intersections, overrides):
+    """Stage 5: Engineer Overrides sheet. One row per overridden cell.
+    Omitted entirely (no sheet added) if there are no overrides."""
+    am = overrides.get('AM') or {}
+    pm = overrides.get('PM') or {}
+    total = sum(len(m) for m in am.values()) + sum(len(m) for m in pm.values())
+    if total == 0:
+        return
+
+    ws = wb.create_sheet('Engineer Overrides')
+
+    # Header
+    for col, label in enumerate(['Int #', 'Name', 'Period', 'Movement', 'Raw', 'Balanced', 'Override'], start=1):
+        c = ws.cell(row=1, column=col, value=label)
+        _style_header(c)
+
+    # int_num → intersection dict for quick lookups
+    by_num = {str(it.get('num')): it for it in intersections}
+
+    rows = []
+    for period, period_map in (('AM', am), ('PM', pm)):
+        for int_str, mvts in period_map.items():
+            it = by_num.get(int_str)
+            if not it:
+                continue
+            raw_period = (it.get('volumes') or {}).get(period) or {}
+            bal_period = (it.get('balanced') or {}).get(period) or {}
+            for mv, override_val in mvts.items():
+                raw_cell = raw_period.get(mv)
+                raw_val = raw_cell.get('value') if isinstance(raw_cell, dict) else raw_cell
+                bal_val = bal_period.get(mv)
+                rows.append({
+                    'num': int(int_str),
+                    'name': it.get('name', ''),
+                    'period': period,
+                    'movement': mv,
+                    'raw': raw_val or 0,
+                    'balanced': bal_val or 0,
+                    'override': override_val,
+                })
+
+    rows.sort(key=lambda r: (r['num'], r['period'], r['movement']))
+    for ridx, r in enumerate(rows, start=2):
+        _style_data(ws.cell(row=ridx, column=1, value=r['num']), fmt='0')
+        _style_data(ws.cell(row=ridx, column=2, value=r['name']), align=LEFT)
+        _style_data(ws.cell(row=ridx, column=3, value=r['period']), align=LEFT)
+        _style_data(ws.cell(row=ridx, column=4, value=r['movement']), align=LEFT)
+        _style_data(ws.cell(row=ridx, column=5, value=r['raw']), fmt='0')
+        _style_data(ws.cell(row=ridx, column=6, value=r['balanced']), fmt='0')
+        _style_data(ws.cell(row=ridx, column=7, value=r['override']), fmt='0')
+
+    ws.freeze_panes = 'A2'
+    for col, width in ((1, 8), (2, 32), (3, 8), (4, 10), (5, 10), (6, 10), (7, 10)):
+        ws.column_dimensions[get_column_letter(col)].width = width
+
+
 def build_workbook(project_state):
     """Build the full 8-sheet workbook from the project snapshot.
 
@@ -330,17 +405,23 @@ def build_workbook(project_state):
     """
     intersections = project_state.get('intersections') or []
     last_run = (project_state.get('analysis') or {}).get('lastRun') or {}
+    # Stage 5: per-cell engineer overrides applied on top of balanced values
+    overrides = ((project_state.get('balancing') or {}).get('overrides')) or {'AM': {}, 'PM': {}}
 
     wb = Workbook()
 
     _write_project_info(wb.active, project_state)
     _write_volume_sheet(wb.create_sheet(), 'AM Unbalanced', intersections, 'AM', balanced=False)
-    _write_volume_sheet(wb.create_sheet(), 'AM Balanced',   intersections, 'AM', balanced=True)
+    _write_volume_sheet(wb.create_sheet(), 'AM Balanced',   intersections, 'AM', balanced=True,
+                        overrides=overrides.get('AM') or {})
     _write_volume_sheet(wb.create_sheet(), 'PM Unbalanced', intersections, 'PM', balanced=False)
-    _write_volume_sheet(wb.create_sheet(), 'PM Balanced',   intersections, 'PM', balanced=True)
+    _write_volume_sheet(wb.create_sheet(), 'PM Balanced',   intersections, 'PM', balanced=True,
+                        overrides=overrides.get('PM') or {})
     _write_convergence(wb.create_sheet(),  last_run)
     _write_qc(wb.create_sheet(),           last_run)
     _write_adjustments(wb.create_sheet(),  last_run)
+    # Stage 5: Engineer Overrides sheet (omitted entirely if no overrides)
+    _write_overrides(wb, intersections, overrides)
 
     buf = io.BytesIO()
     wb.save(buf)

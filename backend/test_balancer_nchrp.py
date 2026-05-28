@@ -376,6 +376,91 @@ def test_link_conservation_holds():
     print(f"  test_link_conservation_holds: PASS (post-round reconciliation enforces conservation)")
 
 
+# ─── Test 9 — Stage 5 (amendment v2): movements_review schema, ordering, ──
+#               all-movements coverage (no drop-only filter)
+def test_movements_review_present():
+    """balance_nchrp returns movements_review with ONE entry per
+    (int_num, movement) where raw>0 — INCLUDING entries where balanced>=raw.
+    Sorted by int_num asc then standard L/T/R movement order."""
+    coords = {n: {'lat': 0.0, 'lng': float(n)} for n in range(1, 10)}
+    coords[6] = {'lat': 0.005, 'lng': 5.0}; coords[5] = {'lat': 0.0, 'lng': 5.0}
+    raw = {
+        1: mk({'EBL':80,'EBT':1000,'EBR':50,'WBL':50,'WBT':900,'WBR':40,'NBR':25,'SBL':25}),
+        2: mk({'EBL':60,'EBT':1050,'EBR':40,'WBL':40,'WBT':920,'WBR':50,'NBR':20,'SBL':30}),
+        3: mk({'EBL':100,'EBT':1020,'EBR':70,'WBL':70,'WBT':880,'WBR':60,'NBR':35,'SBL':40}),
+        4: mk({'EBL':80,'EBT':980,'EBR':60,'WBL':60,'WBT':850,'WBR':50,'NBR':30,'SBL':35}),
+        5: mk({'EBL':90,'EBT':950,'EBR':80,'WBL':80,'WBT':820,'WBR':70,
+               'NBL':30,'NBT':200,'NBR':35,'SBL':40,'SBT':180,'SBR':25}),
+        6: mk({'NBL':25,'NBT':220,'NBR':30,'SBL':35,'SBT':200,'SBR':28}),
+        7: mk({'EBL':70,'EBT':900,'EBR':50,'WBL':50,'WBT':800,'WBR':60,'NBR':25,'SBL':30}),
+        8: mk({'EBL':60,'EBT':880,'EBR':50,'WBL':50,'WBT':770,'WBR':50,'NBR':25,'SBL':25}),
+        9: mk({'EBL':50,'EBT':850,'EBR':40,'WBL':40,'WBT':750,'WBR':40,'NBR':20,'SBL':20}),
+    }
+    links = ([{'fromNum': a, 'toNum': b, 'direction': 'EB/WB'} for a, b in [(1,2),(2,3),(3,4),(4,5),(5,7),(7,8),(8,9)]]
+             + [{'fromNum': 5, 'toNum': 6, 'direction': 'NB/SB'}])
+
+    result = balance_nchrp(raw, links, method='larger', coords=coords)
+    review = result['movements_review']
+    assert isinstance(review, list), f"movements_review should be list; got {type(review)}"
+    assert len(review) > 0, "Bodger has many movements; review should be non-empty"
+
+    # Schema unchanged
+    for e in review:
+        assert set(e.keys()) == {'int_num', 'movement', 'raw', 'balanced', 'delta'}, \
+            f"bad schema: {e.keys()}"
+        assert e['delta'] == e['balanced'] - e['raw']
+        assert e['raw'] > 0, "raw==0 entries should be excluded"
+
+    # Now expect ONE entry per (int_num, movement) with raw>0 — drops AND non-drops.
+    standard = ('EBL','EBT','EBR','WBL','WBT','WBR','NBL','NBT','NBR','SBL','SBT','SBR')
+    expected_count = 0
+    for n, raw_v in raw.items():
+        for mv in standard:
+            if raw_v.get(mv, 0) > 0:
+                expected_count += 1
+    assert len(review) == expected_count, \
+        f"review has {len(review)} entries; expected {expected_count} (every raw>0 movement)"
+
+    # At least one non-drop must be present now (proves filter was removed)
+    non_drops = [e for e in review if e['delta'] >= 0]
+    assert len(non_drops) > 0, "review must include movements where balanced>=raw"
+
+    # Sort: int_num asc, then standard movement order
+    mv_rank = {mv: i for i, mv in enumerate(standard)}
+    expected_order = sorted(review, key=lambda x: (x['int_num'], mv_rank[x['movement']]))
+    assert review == expected_order, \
+        "list should be sorted by int_num asc, then standard movement order"
+
+    print(f"  test_movements_review_present: PASS ({len(review)} movements; "
+          f"{sum(1 for e in review if e['delta'] < 0)} drops)")
+
+
+# ─── Test 10 — Stage 5 v2: all_movements coverage explicit ─────────────────
+def test_all_movements_present():
+    """Every (int × movement-with-raw>0) appears in movements_review — no
+    threshold gating. Specifically: every NON-drop (delta>=0) is also present."""
+    coords = {1: {'lat': 0.0, 'lng': 0.0}, 2: {'lat': 0.0, 'lng': 1.0}}
+    raw = {
+        1: mk({'EBT': 1000, 'WBT': 800, 'EBL': 50, 'WBR': 30}),
+        2: mk({'EBT': 1000, 'WBT': 800, 'EBR': 40, 'WBL': 60}),
+    }
+    links = [{'fromNum': 1, 'toNum': 2, 'direction': 'EB/WB'}]
+    result = balance_nchrp(raw, links, method='larger', coords=coords)
+    review = result['movements_review']
+
+    # Build the set of (int, mv) entries actually present in review
+    present = {(e['int_num'], e['movement']) for e in review}
+
+    # Every raw-positive movement should be there
+    for n, raw_v in raw.items():
+        for mv, val in raw_v.items():
+            if val > 0 and mv in ('EBL','EBT','EBR','WBL','WBT','WBR','NBL','NBT','NBR','SBL','SBT','SBR'):
+                assert (n, mv) in present, \
+                    f"({n},{mv}) raw={val} missing from review (drop-only filter still active?)"
+
+    print(f"  test_all_movements_present: PASS ({len(review)} entries cover every raw>0 movement)")
+
+
 if __name__ == '__main__':
     tests = [
         test_furness_4x4_known_answer,
@@ -386,6 +471,8 @@ if __name__ == '__main__':
         test_end_to_end_3int_corridor,
         test_imbalanced_4x4_ipf,
         test_link_conservation_holds,
+        test_movements_review_present,
+        test_all_movements_present,
     ]
     passed = 0
     failed = 0
