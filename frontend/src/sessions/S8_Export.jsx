@@ -9,10 +9,14 @@ import {
 } from 'lucide-react'
 
 import { subscribe, getSnapshot } from '../store/projectStore'
+import { buildGridCell } from '../lib/diagramPayload'
 
 import '../styles/forms.css'
 import '../styles/map.css'        // .di-modal*, .di-banner, .di-btn-primary, .di-btn-secondary
 import '../styles/export.css'
+
+const GRID_VIEWS = ['combined', 'balanced', 'unbalanced', 'delta']
+const GRID_PERIODS = ['Both', 'AM', 'PM']
 
 const STORAGE_KEY = 'demandiq:project'
 
@@ -63,6 +67,11 @@ export default function S8_Export() {
   const [excelStatus, setExcelStatus] = useState('idle')   // idle | loading | error
   const [excelError, setExcelError] = useState(null)
   const [confirmOpen, setConfirmOpen] = useState(false)
+  // Stage 10.5: diagram batch (composite grid PNG)
+  const [gridPeriod, setGridPeriod] = useState('Both')
+  const [gridView, setGridView] = useState('combined')
+  const [gridStatus, setGridStatus] = useState('idle')     // idle | loading | error
+  const [gridError, setGridError] = useState(null)
 
   if (needsRun) {
     return (
@@ -106,6 +115,43 @@ export default function S8_Export() {
     const json = JSON.stringify(snap, null, 2)
     const blob = new Blob([json], { type: 'application/json' })
     triggerBlobDownload(blob, `${filename}.demandiq.json`)
+  }
+
+  // ── Diagram batch (composite grid PNG) ──────────────────────────────
+  const downloadDiagramGrid = async () => {
+    setGridStatus('loading')
+    setGridError(null)
+    try {
+      const overrides = snap.balancing?.overrides ?? { AM: {}, PM: {} }
+      const periods = gridPeriod === 'Both' ? ['AM', 'PM'] : [gridPeriod]
+      // Cells ordered intersection-major: Int1 AM, Int1 PM, Int2 AM, … so an
+      // intersection's two periods sit adjacent in the grid.
+      const cells = []
+      for (const it of intersections) {
+        for (const p of periods) cells.push(buildGridCell(it, p, overrides))
+      }
+      if (cells.length === 0) throw new Error('No intersections to export')
+
+      const title = `${project.name || 'Project'} — ${gridPeriod} · ${gridView}`
+      const res = await fetch('/api/export-diagram-grid', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cells, view_mode: gridView, cols: 3, title }),
+      })
+      if (!res.ok) {
+        let detail = `HTTP ${res.status}`
+        try { const j = await res.json(); if (j?.detail) detail = j.detail } catch {}
+        throw new Error(detail)
+      }
+      const blob = await res.blob()
+      triggerBlobDownload(blob, `${filename}_diagrams_${gridPeriod}_${gridView}.png`)
+      setGridStatus('idle')
+    } catch (err) {
+      setGridError(
+        `${err.message}. Make sure the backend is running (cd backend && python3.12 app.py).`
+      )
+      setGridStatus('error')
+    }
   }
 
   // ── New project ─────────────────────────────────────────────────────
@@ -240,25 +286,58 @@ export default function S8_Export() {
               </button>
             </div>
 
-            {/* Card 4 — PNG Grid (Phase 2) */}
-            <div className="di-s8-card di-s8-card--phase2">
+            {/* Card 4 — Diagram grid (composite PNG) */}
+            <div className="di-s8-card">
               <div className="di-s8-card__head">
                 <div className="di-s8-card__icon"><ImageIcon size={20} /></div>
                 <div className="di-s8-card__title-wrap">
-                  <div className="di-s8-card__title">PNG Grid</div>
-                  <span className="di-s8-card__badge">Phase 2</span>
+                  <div className="di-s8-card__title">Diagram Grid</div>
                 </div>
               </div>
               <p className="di-s8-card__desc">
-                All intersection diagrams in a single composite image, sized to print.
+                All intersection diagrams in a single composite image, sized to print
+                (3 across). Reflects engineer overrides; each cell is tagged with its period.
               </p>
+              <div className="di-s8-grid-opts">
+                <label className="di-s8-grid-opt">
+                  <span>Period</span>
+                  <select
+                    className="di-input di-s8-grid-select"
+                    value={gridPeriod}
+                    onChange={(e) => setGridPeriod(e.target.value)}
+                  >
+                    {GRID_PERIODS.map((p) => <option key={p} value={p}>{p}</option>)}
+                  </select>
+                </label>
+                <label className="di-s8-grid-opt">
+                  <span>View</span>
+                  <select
+                    className="di-input di-s8-grid-select"
+                    value={gridView}
+                    onChange={(e) => setGridView(e.target.value)}
+                  >
+                    {GRID_VIEWS.map((v) => <option key={v} value={v}>{v}</option>)}
+                  </select>
+                </label>
+              </div>
               <button
                 type="button"
-                className="di-btn-secondary di-s8-card__btn"
-                disabled
+                className="di-btn-primary di-s8-card__btn"
+                disabled={gridStatus === 'loading'}
+                onClick={downloadDiagramGrid}
               >
-                Coming soon
+                {gridStatus === 'loading' ? (
+                  <>
+                    <Loader2 size={14} className="di-spin" style={{ verticalAlign: '-2px' }} />
+                    {' '}Rendering…
+                  </>
+                ) : (
+                  <>Download .png</>
+                )}
               </button>
+              {gridStatus === 'error' && gridError && (
+                <div className="di-s8-error">{gridError}</div>
+              )}
             </div>
           </div>
         </div>

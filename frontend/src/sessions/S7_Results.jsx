@@ -9,6 +9,7 @@ import {
 } from '../store/projectStore'
 import DiagramCard from '../components/DiagramCard'
 import ResultsMap from '../components/ResultsMap'
+import { buildPayload } from '../lib/diagramPayload'
 
 import '../styles/forms.css'
 import '../styles/map.css'         // .di-modal, .di-banner, .di-btn-primary, .di-pin
@@ -32,63 +33,6 @@ function hasAnyBalanced(intersections) {
     if (it.balanced?.PM && Object.keys(it.balanced.PM).length > 0) return true
   }
   return false
-}
-
-// ── /balance result → /line-diagram payload helpers ──────────────────
-function stripVols(period, intersection) {
-  const out = {}
-  const cells = intersection.volumes?.[period] ?? {}
-  for (const [mv, cell] of Object.entries(cells)) {
-    if (cell?.value != null) out[mv] = cell.value
-  }
-  return out
-}
-
-function activeLegs(intersection) {
-  return ['EB', 'WB', 'NB', 'SB'].filter(
-    (d) => intersection.approaches?.[d]?.exists !== false
-  )
-}
-
-function parseStreets(intersection) {
-  const parts = (intersection.name || '').split(' & ').map((s) => s.trim())
-  const first = parts[0] || ''
-  const second = parts[1] || ''
-  if (intersection.mainDir === 'NB/SB') return { NS: first, EW: second }
-  // Default + 'EB/WB' + diagonals: first street goes on EW axis.
-  return { EW: first, NS: second }
-}
-
-function stoppedApproaches(intersection, legs) {
-  const c = intersection.control
-  if (c === 'All-way stop') return legs
-  if (c === 'Two-way stop') {
-    const minor = intersection.mainDir === 'NB/SB' ? ['EB', 'WB'] : ['NB', 'SB']
-    return legs.filter((d) => minor.includes(d))
-  }
-  return []
-}
-
-function buildPayload(intersection, period, viewMode, overrides) {
-  const legs = activeLegs(intersection)
-  return {
-    intersection: {
-      num: intersection.num,
-      name: intersection.name,
-      active_legs: legs,
-      control: intersection.control,
-      streets: parseStreets(intersection),
-      stopped_approaches: stoppedApproaches(intersection, legs),
-    },
-    u_vols: stripVols(period, intersection),
-    b_vols: intersection.balanced?.[period] ?? {},
-    // Stage 5: per-cell engineer overrides for this intersection's period.
-    // Replaces b_vols values + adds "*" suffix to overridden cell labels.
-    overrides: overrides?.[period]?.[String(intersection.num)] ?? {},
-    // Stage 10.4: free-text caption rendered below the cell.
-    annotation: intersection.diagramNote ?? '',
-    view_mode: viewMode,
-  }
 }
 
 const safeFilename = (s) => String(s ?? '').replace(/[^a-z0-9]+/gi, '_').replace(/^_+|_+$/g, '')

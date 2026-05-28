@@ -32,7 +32,7 @@ from openpyxl.styles import Font, Alignment, PatternFill
 from count_agent import extract, MOVEMENTS
 from balancer import balance_corridor, run_qc
 from balancer import balance_nchrp, fractional_volume_flags
-from line_diagram import render_single_diagram, VIEW_MODES, FIG_INCHES, DPI
+from line_diagram import render_single_diagram, render_diagram_grid, VIEW_MODES, FIG_INCHES, DPI
 from excel_export import build_workbook
 
 # ── Config ────────────────────────────────────────────────────────────────────
@@ -514,6 +514,64 @@ async def line_diagram_endpoint(payload: dict):
         "width": px,
         "height": px,
     }
+
+
+@app.post("/export-diagram-grid", dependencies=[Depends(require_auth)])
+async def export_diagram_grid_endpoint(payload: dict):
+    """Stage 10.5: render every intersection diagram into ONE composite PNG
+    grid. Reuses render_single_diagram's cell engine via render_diagram_grid.
+
+    Payload:
+      {
+        "cells": [ {"intersection": {...geo}, "u_vols": {}, "b_vols": {},
+                    "overrides": {}, "period_label": "AM"|"PM"|null }, ... ],
+        "view_mode": "combined" | "balanced" | "unbalanced" | "delta",
+        "cols": int,                # optional, default 3
+        "title": str,               # optional banner
+      }
+    Returns: image/png (binary).
+    """
+    cells_in = payload.get("cells")
+    if not isinstance(cells_in, list) or not cells_in:
+        raise HTTPException(status_code=400, detail="cells must be a non-empty list")
+
+    view_mode = payload.get("view_mode", "combined")
+    if view_mode not in VIEW_MODES:
+        raise HTTPException(status_code=400, detail=f"view_mode must be one of {VIEW_MODES}")
+
+    cols = payload.get("cols", 3)
+    try:
+        cols = int(cols)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="cols must be an integer")
+
+    cells = []
+    for c in cells_in:
+        if not isinstance(c, dict):
+            raise HTTPException(status_code=400, detail="each cell must be a dict")
+        geo = c.get("intersection")
+        if not isinstance(geo, dict) or "num" not in geo:
+            raise HTTPException(status_code=400, detail="each cell.intersection needs 'num'")
+        cells.append({
+            "geo": geo,
+            "u_vols": c.get("u_vols") or {},
+            "b_vols": c.get("b_vols") or {},
+            "overrides": c.get("overrides") or {},
+            "period_label": c.get("period_label"),
+        })
+
+    try:
+        png_bytes = render_diagram_grid(
+            cells, view_mode=view_mode, cols=cols, title=payload.get("title"),
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"grid render failed: {e}")
+
+    return StreamingResponse(
+        io.BytesIO(png_bytes),
+        media_type="image/png",
+        headers={"Content-Disposition": 'attachment; filename="demandiq_diagrams.png"'},
+    )
 
 
 @app.post("/export-excel", dependencies=[Depends(require_auth)])

@@ -20,6 +20,7 @@ locked from the original — DO NOT redesign. Only changes vs the original:
 """
 
 import io
+import math
 
 import matplotlib
 matplotlib.use('Agg')                       # headless before pyplot import
@@ -344,8 +345,11 @@ def _fit_street_label(text, base_fs, fig_inches, max_text_extent, min_fs=6.0):
     return '\n'.join(wrapped), round(fs, 1)
 
 
-def _dg_draw_cell(ax, geo, u_vols, b_vols, p, label_fn, overrides=None):
-    """Draw one full intersection cell into `ax` using preset p."""
+def _dg_draw_cell(ax, geo, u_vols, b_vols, p, label_fn, overrides=None, period_label=None):
+    """Draw one full intersection cell into `ax` using preset p.
+
+    period_label: optional 'AM'/'PM' tag drawn top-right (used by the batch
+    grid so each cell shows its period; single-cell renders pass None)."""
     active  = geo.get('active_legs', ['NB', 'SB', 'EB', 'WB'])
     control = geo.get('control', 'Signalized')
     streets = geo.get('streets', {})
@@ -415,6 +419,9 @@ def _dg_draw_cell(ax, geo, u_vols, b_vols, p, label_fn, overrides=None):
             fontweight='bold', ha='center', va='center', zorder=11)
     ax.text(0.5, 0.955, name.replace(' & ', ' @ '), fontsize=p['fs_name'],
             color=DG_BLACK, fontweight='bold', ha='center', va='center')
+    if period_label:
+        ax.text(0.92, 0.922, period_label, fontsize=p['fs_num'], color=DG_BLACK,
+                fontweight='bold', ha='right', va='center', zorder=11)
 
 
 # ── View-mode label functions ──────────────────────────────────────────────────
@@ -506,6 +513,66 @@ def render_single_diagram(intersection_geo, u_vols, b_vols, view_mode='combined'
     if caption:
         fig.text(0.5, bottom_frac / 2, f"Note: {caption}", ha='center', va='center',
                  fontsize=DG_CAP_FS, color=DG_BLACK, linespacing=1.3)
+
+    buf = io.BytesIO()
+    fig.savefig(buf, format='png', dpi=DPI, facecolor=DG_WHITE)
+    plt.close(fig)
+    buf.seek(0)
+    return buf.read()
+
+
+GRID_DEFAULT_COLS = 3
+
+
+def render_diagram_grid(cells, view_mode='combined', cols=GRID_DEFAULT_COLS, title=None):
+    """Stage 10.5: compose multiple intersection cells into ONE print-sized
+    composite PNG grid. Reuses _dg_draw_cell — each cell is a square
+    FIG_INCHES×FIG_INCHES subplot, so a 3-wide grid is ~12in across.
+
+    Args:
+      cells: list of {geo, u_vols, b_vols, overrides, period_label}.
+             Per-cell engineer annotations are NOT drawn here (they'd break
+             the uniform grid) — they live on the individual per-card PNGs.
+      view_mode: label mode applied to every cell.
+      cols: columns in the grid (rows derived).
+      title: optional banner drawn across the top.
+
+    Returns: bytes (PNG). Raises ValueError if `cells` is empty.
+    """
+    n = len(cells)
+    if n == 0:
+        raise ValueError("render_diagram_grid: no cells to render")
+
+    label_fn = _make_label_fn(view_mode)
+    cols = max(1, min(int(cols), n))
+    rows = math.ceil(n / cols)
+    cell_in = FIG_INCHES
+    p = _single_cell_preset(cell_in)
+
+    title_h = 0.6 if title else 0.0
+    fig_w = cols * cell_in
+    fig_h = rows * cell_in + title_h
+    fig = plt.figure(figsize=(fig_w, fig_h), facecolor=DG_WHITE)
+
+    cell_frac_w = 1.0 / cols
+    grid_frac_h = (rows * cell_in) / fig_h          # fraction below the title band
+    cell_frac_h = grid_frac_h / rows
+
+    for i, c in enumerate(cells):
+        r = i // cols
+        col = i % cols
+        left = col * cell_frac_w
+        # row 0 at the top, working down (title band occupies the very top)
+        bottom = (rows - 1 - r) * cell_frac_h
+        ax = fig.add_axes([left, bottom, cell_frac_w, cell_frac_h])
+        _dg_draw_cell(
+            ax, c['geo'], c.get('u_vols') or {}, c.get('b_vols') or {},
+            p, label_fn, c.get('overrides') or {}, period_label=c.get('period_label'),
+        )
+
+    if title:
+        fig.text(0.5, 1 - (title_h / fig_h) / 2, title, ha='center', va='center',
+                 fontsize=14, fontweight='bold', color=DG_BLACK)
 
     buf = io.BytesIO()
     fig.savefig(buf, format='png', dpi=DPI, facecolor=DG_WHITE)

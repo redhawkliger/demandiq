@@ -12,7 +12,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from PIL import Image
 from line_diagram import (
-    render_single_diagram, _wrap_caption,
+    render_single_diagram, render_diagram_grid, _wrap_caption,
     DG_CAP_MAX_LINES, FIG_INCHES, DPI,
 )
 
@@ -69,11 +69,58 @@ def test_empty_annotation_is_noop():
     print("  test_empty_annotation_is_noop: PASS")
 
 
+# ─── Stage 10.5: composite diagram grid ────────────────────────────────────
+def _grid_cell(num, period_label=None):
+    return {
+        'geo': {'num': num, 'name': f'Int {num} & Cross',
+                'active_legs': ['NB', 'SB', 'EB', 'WB'], 'control': 'Signalized',
+                'streets': {'NS': 'Cross', 'EW': 'Main'}, 'stopped_approaches': []},
+        'u_vols': {'EBT': 1000, 'WBT': 900}, 'b_vols': {'EBT': 1050, 'WBT': 950},
+        'overrides': {}, 'period_label': period_label,
+    }
+
+
+def test_grid_dimensions():
+    cell_px = int(FIG_INCHES * DPI)
+    # 5 cells, 3 cols → 2 rows
+    png = render_diagram_grid([_grid_cell(i) for i in range(1, 6)], 'combined', cols=3)
+    w, h = _size(png)
+    assert w == 3 * cell_px, w
+    assert h == 2 * cell_px, h
+    # 10 cells (Both periods ×5), 3 cols → 4 rows
+    both = []
+    for i in range(1, 6):
+        both += [_grid_cell(i, 'AM'), _grid_cell(i, 'PM')]
+    w2, h2 = _size(render_diagram_grid(both, 'combined', cols=3))
+    assert (w2, h2) == (3 * cell_px, 4 * cell_px), (w2, h2)
+    print(f"  test_grid_dimensions: PASS (5→{w}x{h}, 10→{w2}x{h2})")
+
+
+def test_grid_title_adds_band():
+    base = _size(render_diagram_grid([_grid_cell(1)], 'combined', cols=3))
+    titled = _size(render_diagram_grid([_grid_cell(1)], 'combined', cols=3, title='Corridor'))
+    assert titled[0] == base[0], 'title must not change width'
+    assert titled[1] > base[1], 'title adds a top band (taller)'
+    print(f"  test_grid_title_adds_band: PASS ({base} → {titled})")
+
+
+def test_grid_empty_raises():
+    try:
+        render_diagram_grid([], 'combined')
+        assert False, 'empty cells should raise'
+    except ValueError:
+        pass
+    print("  test_grid_empty_raises: PASS")
+
+
 if __name__ == '__main__':
     tests = [
         test_wrap_caption,
         test_render_reserves_band_for_annotation,
         test_empty_annotation_is_noop,
+        test_grid_dimensions,
+        test_grid_title_adds_band,
+        test_grid_empty_raises,
     ]
     passed = failed = 0
     for t in tests:

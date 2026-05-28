@@ -162,6 +162,25 @@
   margin-top: 4px;
 }
 
+/* Stage 10.5: diagram-grid period/view selectors */
+.di-s8-grid-opts {
+  display: flex;
+  gap: 12px;
+  margin: 4px 0 8px;
+}
+.di-s8-grid-opt {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+.di-s8-grid-select {
+  text-transform: capitalize;
+  padding: 6px 8px;
+  font-size: 12px;
+}
+
 .di-s8-error {
   background: rgba(255, 107, 107, 0.08);
   border: 1px solid rgba(255, 107, 107, 0.4);
