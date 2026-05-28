@@ -1,4 +1,6 @@
 import { NavLink } from 'react-router-dom'
+import { LifeBuoy } from 'lucide-react'
+import { exportDiagnostics } from '../lib/diagnostics'
 
 const STEPS = [
   { num: 1, label: 'Project Setup',      path: '/' },
@@ -69,6 +71,30 @@ export default function Sidebar() {
           <span>{label}</span>
         </NavLink>
       ))}
+
+      {/* App-level actions — pinned to the bottom */}
+      <button
+        type="button"
+        onClick={() => exportDiagnostics()}
+        title="Download a JSON snapshot of project state for debugging (no credentials)"
+        style={{
+          marginTop: 'auto',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 10,
+          padding: '8px 12px',
+          borderRadius: 6,
+          border: '1px solid var(--border)',
+          background: 'transparent',
+          color: 'var(--text-secondary)',
+          fontSize: 12,
+          cursor: 'pointer',
+          fontFamily: 'inherit',
+        }}
+      >
+        <LifeBuoy size={14} />
+        <span>Export diagnostics</span>
+      </button>
     </aside>
   )
 }
