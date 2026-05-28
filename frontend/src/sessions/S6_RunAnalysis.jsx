@@ -8,6 +8,7 @@ import {
   getLinks,
   applyBalancedRun,
   setLastRun,
+  clearAllOverrides,
 } from '../store/projectStore'
 
 import '../styles/forms.css'
@@ -102,6 +103,22 @@ export default function S6_RunAnalysis() {
   // returns. The TICK_MS / amIter / pmIter machinery is gone.
   const [status, setStatus] = useState(lastRun ? 'done' : 'idle')
   const [error, setError]   = useState(null)
+  // Stage 5: confirmation modal before re-running when engineer overrides exist
+  const [pendingRunReason, setPendingRunReason] = useState(null)
+  const overrides = snap.balancing?.overrides ?? { AM: {}, PM: {} }
+  const overrideCount =
+    Object.values(overrides.AM || {}).reduce((acc, m) => acc + Object.keys(m).length, 0) +
+    Object.values(overrides.PM || {}).reduce((acc, m) => acc + Object.keys(m).length, 0)
+
+  const onClickRunButton = () => {
+    // Stage 5: if overrides exist, prompt before re-running. They survive by
+    // default — engineer can opt to discard.
+    if (overrideCount > 0) {
+      setPendingRunReason('rerun')
+      return
+    }
+    handleRun()
+  }
 
   const handleRun = async () => {
     setStatus('fetching')
@@ -130,9 +147,9 @@ export default function S6_RunAnalysis() {
         iterations: data.iterations ?? { AM: {}, PM: {} },
         intConverged: data.converged ?? { AM: {}, PM: {} },
         // Stage 4c.1: link conservation is the engineer-facing correctness check.
-        // Intersection-internal residual still returned by the backend for
-        // debugging but no longer displayed.
         linkConservation: data.link_conservation ?? { AM: [], PM: [] },
+        // Stage 5: below-raw movements (no threshold) for the Review drops UI
+        movementsReview: data.movements_review ?? { AM: [], PM: [] },
         qcFlags: data.qc_flags ?? [],
         // Stage 4 has no chains[] (algorithm is per-intersection, not chain-based)
         chains: [],
@@ -217,7 +234,7 @@ export default function S6_RunAnalysis() {
               type="button"
               className={`di-s6-run__btn${hasResults && status !== 'fetching' ? ' di-s6-run__btn--secondary' : ''}`}
               disabled={isRunning}
-              onClick={handleRun}
+              onClick={onClickRunButton}
             >
               {status === 'fetching' && <Loader2 size={18} className="di-spin" />}
               {status === 'fetching' ? 'Running…' : hasResults ? 'Re-run analysis' : 'Run analysis'}
@@ -263,11 +280,56 @@ export default function S6_RunAnalysis() {
           type="button"
           className="di-btn-primary"
           disabled={!hasResults || status !== 'done'}
-          onClick={() => navigate('/results')}
+          onClick={() => navigate('/review-drops')}
         >
-          Continue to results →
+          Continue to review drops →
         </button>
       </footer>
+
+      {pendingRunReason && (
+        <RerunOverridesModal
+          count={overrideCount}
+          onCancel={() => setPendingRunReason(null)}
+          onKeep={() => { setPendingRunReason(null); handleRun() }}
+          onDiscard={() => { setPendingRunReason(null); clearAllOverrides(); handleRun() }}
+        />
+      )}
+    </div>
+  )
+}
+
+// Stage 5: confirmation modal shown before a re-run when overrides exist.
+function RerunOverridesModal({ count, onCancel, onKeep, onDiscard }) {
+  return (
+    <div className="di-modal-backdrop" onMouseDown={onCancel}>
+      <div
+        className="di-modal di-modal--info"
+        role="dialog"
+        aria-modal="true"
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        <div className="di-modal__header">
+          <h2 className="di-modal__title">Re-run with engineer overrides?</h2>
+        </div>
+        <div className="di-modal__body">
+          <p>
+            You have <strong>{count}</strong> active engineer override{count === 1 ? '' : 's'} across
+            AM and PM. Re-running the balance will produce new balanced values; your
+            existing overrides will be kept by default (and take precedence in
+            downstream views).
+          </p>
+          <p style={{ marginTop: 8 }}>
+            <strong>Keep:</strong> overrides remain — they'll override whatever the new
+            run produces.<br />
+            <strong>Discard:</strong> overrides are cleared first, then re-run.
+          </p>
+        </div>
+        <div className="di-modal__footer">
+          <button type="button" className="di-btn-secondary" onClick={onCancel}>Cancel</button>
+          <button type="button" className="di-btn-secondary" onClick={onDiscard}>Discard overrides + re-run</button>
+          <button type="button" className="di-btn-primary" onClick={onKeep}>Keep overrides + re-run</button>
+        </div>
+      </div>
     </div>
   )
 }

@@ -7,6 +7,7 @@ import S3_ApproachConfig from './sessions/S3_ApproachConfig'
 import S4_VolumeEntry from './sessions/S4_VolumeEntry'
 import S5_BalancingSettings from './sessions/S5_BalancingSettings'
 import S6_RunAnalysis from './sessions/S6_RunAnalysis'
+import S7_ReviewDrops from './sessions/S7_ReviewDrops'
 import S7_Results from './sessions/S7_Results'
 import S8_Export from './sessions/S8_Export'
 
@@ -25,6 +26,7 @@ export default function App() {
               <Route path="/volumes" element={<S4_VolumeEntry />} />
               <Route path="/balancing" element={<S5_BalancingSettings />} />
               <Route path="/analysis" element={<S6_RunAnalysis />} />
+              <Route path="/review-drops" element={<S7_ReviewDrops />} />
               <Route path="/results" element={<S7_Results />} />
               <Route path="/export" element={<S8_Export />} />
               <Route path="*" element={<Navigate to="/" replace />} />

@@ -68,7 +68,7 @@ function stoppedApproaches(intersection, legs) {
   return []
 }
 
-function buildPayload(intersection, period, viewMode) {
+function buildPayload(intersection, period, viewMode, overrides) {
   const legs = activeLegs(intersection)
   return {
     intersection: {
@@ -81,6 +81,9 @@ function buildPayload(intersection, period, viewMode) {
     },
     u_vols: stripVols(period, intersection),
     b_vols: intersection.balanced?.[period] ?? {},
+    // Stage 5: per-cell engineer overrides for this intersection's period.
+    // Replaces b_vols values + adds "*" suffix to overridden cell labels.
+    overrides: overrides?.[period]?.[String(intersection.num)] ?? {},
     view_mode: viewMode,
   }
 }
@@ -109,6 +112,10 @@ export default function S7_Results() {
   const period   = snap.results?.period   ?? 'AM'
   const viewMode = snap.results?.viewMode ?? 'combined'
   const timestamp = lastRun?.timestamp ?? ''
+  // Stage 5: engineer overrides invalidate diagram cache (any override change
+  // means a different rendered PNG). Hash-stringify for cache-key suffix.
+  const overrides = snap.balancing?.overrides ?? { AM: {}, PM: {} }
+  const overridesKey = JSON.stringify(overrides)
 
   const needsRun = intersections.length === 0 || !hasAnyBalanced(intersections)
 
@@ -133,10 +140,11 @@ export default function S7_Results() {
     })
   }
 
-  const triggerFetch = (it, p, v, ts) => {
-    const key = `${it.id}-${p}-${v}-${ts}`
+  const triggerFetch = (it, p, v, ts, ovKey) => {
+    // Cache key includes overridesKey so override edits invalidate stale PNGs
+    const key = `${it.id}-${p}-${v}-${ts}-${ovKey}`
     updateEntry(key, { status: 'loading' })
-    fetchDiagram(buildPayload(it, p, v))
+    fetchDiagram(buildPayload(it, p, v, overrides))
       .then((data) => updateEntry(key, { status: 'done', png: data.png_base64 }))
       .catch((err) => updateEntry(key, { status: 'error', error: err.message }))
   }
@@ -146,12 +154,12 @@ export default function S7_Results() {
   useEffect(() => {
     if (needsRun) return
     for (const it of intersections) {
-      const key = `${it.id}-${period}-${viewMode}-${timestamp}`
+      const key = `${it.id}-${period}-${viewMode}-${timestamp}-${overridesKey}`
       if (diagramsRef.current.has(key)) continue
-      triggerFetch(it, period, viewMode, timestamp)
+      triggerFetch(it, period, viewMode, timestamp, overridesKey)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [intersections, period, viewMode, timestamp, needsRun])
+  }, [intersections, period, viewMode, timestamp, overridesKey, needsRun])
 
   // ── Selection ──────────────────────────────────────────────────────
   const [selectedId, setSelectedId] = useState(null)
@@ -199,7 +207,7 @@ export default function S7_Results() {
       <div className="di-s7__body">
         <div className="di-s7__left">
           {intersections.map((it) => {
-            const key = `${it.id}-${period}-${viewMode}-${timestamp}`
+            const key = `${it.id}-${period}-${viewMode}-${timestamp}-${overridesKey}`
             const filename = `Int_${String(it.num).padStart(2, '0')}_${safeFilename(it.name)}_${period}_${viewMode}.png`
             return (
               <DiagramCard
@@ -208,7 +216,7 @@ export default function S7_Results() {
                 diagram={diagrams.get(key)}
                 isSelected={selectedId === it.id}
                 onSelect={() => setSelectedId(it.id)}
-                onRetry={() => triggerFetch(it, period, viewMode, timestamp)}
+                onRetry={() => triggerFetch(it, period, viewMode, timestamp, overridesKey)}
                 filename={filename}
               />
             )
