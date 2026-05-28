@@ -12,16 +12,22 @@ import { getSnapshot } from '../store/projectStore'
 const STORAGE_KEY = 'demandiq:project'
 const AUTH_KEY_RE = /(auth|token|password|secret|credential|session|apikey|api_key)/i
 
-// Defensive: drop any top-level key whose name looks auth-related. The
-// current project object has none, but this guards against future additions.
-function stripAuthKeys(obj) {
-  if (!obj || typeof obj !== 'object') return obj
-  const out = {}
-  for (const [k, v] of Object.entries(obj)) {
-    if (AUTH_KEY_RE.test(k)) continue
-    out[k] = v
+// Defensive, recursive: drop any key whose name looks auth-related at ANY
+// depth (objects + arrays). The current project object has none, but this
+// guards against a future change nesting a token inside project/analysis/etc.
+function stripAuthKeys(value) {
+  if (Array.isArray(value)) {
+    return value.map(stripAuthKeys)
   }
-  return out
+  if (value && typeof value === 'object') {
+    const out = {}
+    for (const [k, v] of Object.entries(value)) {
+      if (AUTH_KEY_RE.test(k)) continue
+      out[k] = stripAuthKeys(v)
+    }
+    return out
+  }
+  return value
 }
 
 function safeName(s) {
@@ -50,8 +56,10 @@ export function buildDiagnostics() {
     appVersion,
     userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : '',
     project,
-    lastRun: snap.analysis?.lastRun ?? null,
-    overrides: snap.balancing?.overrides ?? null,
+    // lastRun + overrides also pass through the recursive strip so the
+    // guarantee holds uniformly across every field of the dump.
+    lastRun: stripAuthKeys(snap.analysis?.lastRun ?? null),
+    overrides: stripAuthKeys(snap.balancing?.overrides ?? null),
   }
 }
 
