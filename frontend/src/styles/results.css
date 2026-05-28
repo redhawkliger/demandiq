@@ -150,6 +150,26 @@
   height: auto;
   display: block;
 }
+/* Stage 10.4: per-intersection diagram note editor */
+.di-s7-card__note {
+  margin-top: 8px;
+}
+.di-s7-card__note-input {
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--bg-base);
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-size: 12px;
+  padding: 6px 8px;
+}
+.di-s7-card__note-input::placeholder { color: var(--text-tertiary); }
+.di-s7-card__note-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-glow);
+}
 .di-s7-card__status {
   display: flex;
   align-items: center;

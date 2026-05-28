@@ -444,7 +444,28 @@ FIG_INCHES = 4.0
 DPI = 150
 
 
-def render_single_diagram(intersection_geo, u_vols, b_vols, view_mode='combined', overrides=None):
+# Stage 10.4: caption (annotation) layout.
+DG_CAP_WIDTH    = 46     # wrap width in chars (~fits a 4in-wide figure at fs 9)
+DG_CAP_MAX_LINES = 3     # truncate longer notes with an ellipsis
+DG_CAP_FS       = 9      # caption font size (points)
+
+
+def _wrap_caption(text):
+    """Wrap an annotation to the caption band; truncate to DG_CAP_MAX_LINES
+    with an ellipsis. Returns (wrapped_text, line_count) or ('', 0) if empty."""
+    import textwrap
+    text = ' '.join((text or '').split())   # collapse whitespace/newlines
+    if not text:
+        return '', 0
+    lines = textwrap.wrap(text, width=DG_CAP_WIDTH) or ['']
+    if len(lines) > DG_CAP_MAX_LINES:
+        lines = lines[:DG_CAP_MAX_LINES]
+        lines[-1] = lines[-1].rstrip() + '…'
+    return '\n'.join(lines), len(lines)
+
+
+def render_single_diagram(intersection_geo, u_vols, b_vols, view_mode='combined',
+                          overrides=None, annotation=None):
     """Render one intersection as a PNG.
 
     Args:
@@ -453,6 +474,10 @@ def render_single_diagram(intersection_geo, u_vols, b_vols, view_mode='combined'
                  this intersection in the period being rendered. When provided,
                  each overridden movement's balanced value is replaced and the
                  label gets a "*" suffix so reviewers can spot interventions.
+      annotation: optional free-text note (Stage 10.4). When present it renders
+                 as a wrapped caption strip in a reserved band below the cell.
+                 The square cell is pinned to the top so its geometry is
+                 pixel-identical whether or not a caption is present.
 
     Returns: bytes (PNG data).
     Raises:  ValueError on unknown view_mode.
@@ -460,10 +485,27 @@ def render_single_diagram(intersection_geo, u_vols, b_vols, view_mode='combined'
     label_fn = _make_label_fn(view_mode)
     p = _single_cell_preset(FIG_INCHES)
 
-    fig = plt.figure(figsize=(FIG_INCHES, FIG_INCHES), facecolor=DG_WHITE)
-    ax = fig.add_subplot(1, 1, 1)
-    fig.subplots_adjust(left=0, right=1, top=1, bottom=0)
+    caption, n_lines = _wrap_caption(annotation)
+    if caption:
+        # Reserve a bottom band sized to the line count; the cell stays a
+        # square FIG_INCHES×FIG_INCHES box pinned to the top of a taller figure.
+        cap_h = 0.26 + 0.17 * n_lines        # inches
+        fig_h = FIG_INCHES + cap_h
+        bottom_frac = cap_h / fig_h
+        fig = plt.figure(figsize=(FIG_INCHES, fig_h), facecolor=DG_WHITE)
+        ax = fig.add_subplot(1, 1, 1)
+        ax.set_position([0, bottom_frac, 1, FIG_INCHES / fig_h])
+    else:
+        fig_h = FIG_INCHES
+        fig = plt.figure(figsize=(FIG_INCHES, fig_h), facecolor=DG_WHITE)
+        ax = fig.add_subplot(1, 1, 1)
+        fig.subplots_adjust(left=0, right=1, top=1, bottom=0)
+
     _dg_draw_cell(ax, intersection_geo, u_vols or {}, b_vols or {}, p, label_fn, overrides or {})
+
+    if caption:
+        fig.text(0.5, bottom_frac / 2, f"Note: {caption}", ha='center', va='center',
+                 fontsize=DG_CAP_FS, color=DG_BLACK, linespacing=1.3)
 
     buf = io.BytesIO()
     fig.savefig(buf, format='png', dpi=DPI, facecolor=DG_WHITE)

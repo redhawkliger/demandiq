@@ -1,6 +1,7 @@
+import { useEffect, useState } from 'react'
 import { Download, Loader2, AlertCircle } from 'lucide-react'
 
-// One per intersection. Pure presenter — fetch state lives in S7's cache.
+// One per intersection. Presenter — fetch state lives in S7's cache.
 //
 // Props:
 //   intersection: project intersection
@@ -9,6 +10,8 @@ import { Download, Loader2, AlertCircle } from 'lucide-react'
 //   onSelect: () => void
 //   onRetry: () => void
 //   filename: string  (already composed by parent so download matches current view)
+//   note: string                  (Stage 10.4 — current diagram annotation)
+//   onNoteCommit: (string) => void (commit a new annotation; re-renders the PNG)
 
 function downloadPng(pngBase64, filename) {
   const bin = atob(pngBase64)
@@ -32,8 +35,19 @@ export default function DiagramCard({
   onSelect,
   onRetry,
   filename,
+  note = '',
+  onNoteCommit,
 }) {
   const status = diagram?.status ?? 'loading'
+
+  // Local draft; commit on blur / Enter so we re-render the PNG once per edit
+  // (not on every keystroke). Re-sync if the stored note changes externally.
+  const [draft, setDraft] = useState(note)
+  useEffect(() => { setDraft(note) }, [note])
+
+  const commit = () => {
+    if ((draft ?? '').trim() !== (note ?? '').trim()) onNoteCommit?.(draft)
+  }
 
   return (
     <div
@@ -87,6 +101,23 @@ export default function DiagramCard({
             draggable={false}
           />
         )}
+      </div>
+
+      <div className="di-s7-card__note" onClick={(e) => e.stopPropagation()}>
+        <input
+          type="text"
+          className="di-s7-card__note-input"
+          placeholder="Add a diagram note…"
+          value={draft}
+          maxLength={140}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') e.currentTarget.blur()
+            if (e.key === 'Escape') { setDraft(note); e.currentTarget.blur() }
+          }}
+          aria-label={`Diagram note for intersection ${intersection.num}`}
+        />
       </div>
     </div>
   )

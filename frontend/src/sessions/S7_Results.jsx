@@ -5,6 +5,7 @@ import {
   subscribe,
   getSnapshot,
   setResultsView,
+  setDiagramNote,
 } from '../store/projectStore'
 import DiagramCard from '../components/DiagramCard'
 import ResultsMap from '../components/ResultsMap'
@@ -84,11 +85,18 @@ function buildPayload(intersection, period, viewMode, overrides) {
     // Stage 5: per-cell engineer overrides for this intersection's period.
     // Replaces b_vols values + adds "*" suffix to overridden cell labels.
     overrides: overrides?.[period]?.[String(intersection.num)] ?? {},
+    // Stage 10.4: free-text caption rendered below the cell.
+    annotation: intersection.diagramNote ?? '',
     view_mode: viewMode,
   }
 }
 
 const safeFilename = (s) => String(s ?? '').replace(/[^a-z0-9]+/gi, '_').replace(/^_+|_+$/g, '')
+
+// Diagram cache key. Per-intersection (id) + period + view + run timestamp +
+// overrides + the diagram note — so any of those changing re-renders the PNG.
+const diagramKey = (it, p, v, ts, ovKey) =>
+  `${it.id}-${p}-${v}-${ts}-${ovKey}-${encodeURIComponent(it.diagramNote || '')}`
 
 async function fetchDiagram(payload) {
   const res = await fetch('/api/line-diagram', {
@@ -141,8 +149,9 @@ export default function S7_Results() {
   }
 
   const triggerFetch = (it, p, v, ts, ovKey) => {
-    // Cache key includes overridesKey so override edits invalidate stale PNGs
-    const key = `${it.id}-${p}-${v}-${ts}-${ovKey}`
+    // Cache key includes overridesKey + the per-intersection diagram note so
+    // override edits AND annotation edits both invalidate stale PNGs.
+    const key = diagramKey(it, p, v, ts, ovKey)
     updateEntry(key, { status: 'loading' })
     fetchDiagram(buildPayload(it, p, v, overrides))
       .then((data) => updateEntry(key, { status: 'done', png: data.png_base64 }))
@@ -154,7 +163,7 @@ export default function S7_Results() {
   useEffect(() => {
     if (needsRun) return
     for (const it of intersections) {
-      const key = `${it.id}-${period}-${viewMode}-${timestamp}-${overridesKey}`
+      const key = diagramKey(it, period, viewMode, timestamp, overridesKey)
       if (diagramsRef.current.has(key)) continue
       triggerFetch(it, period, viewMode, timestamp, overridesKey)
     }
@@ -207,7 +216,7 @@ export default function S7_Results() {
       <div className="di-s7__body">
         <div className="di-s7__left">
           {intersections.map((it) => {
-            const key = `${it.id}-${period}-${viewMode}-${timestamp}-${overridesKey}`
+            const key = diagramKey(it, period, viewMode, timestamp, overridesKey)
             const filename = `Int_${String(it.num).padStart(2, '0')}_${safeFilename(it.name)}_${period}_${viewMode}.png`
             return (
               <DiagramCard
@@ -218,6 +227,8 @@ export default function S7_Results() {
                 onSelect={() => setSelectedId(it.id)}
                 onRetry={() => triggerFetch(it, period, viewMode, timestamp, overridesKey)}
                 filename={filename}
+                note={it.diagramNote ?? ''}
+                onNoteCommit={(v) => setDiagramNote(it.id, v)}
               />
             )
           })}

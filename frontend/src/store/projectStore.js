@@ -299,6 +299,17 @@ export function setHvPct(intersectionId, period, value) {
   setIntersections(list)
 }
 
+// Stage 10.4: free-text annotation rendered as a caption on the line diagram.
+// One note per intersection (describes the intersection, not a period) — shows
+// on every view-mode + period of that diagram. Empty string clears it.
+export function setDiagramNote(intersectionId, note) {
+  const clean = (note ?? '').trim()
+  const list = getIntersections().map((it) =>
+    it.id === intersectionId ? { ...it, diagramNote: clean || undefined } : it
+  )
+  setIntersections(list)
+}
+
 // Apply one agent-extracted intersection block (from the /api/extract response)
 // to a project intersection. Wraps every numeric value as { value, _source: 'agent' }.
 export function applyExtractedVolumes(intersectionId, payload) {

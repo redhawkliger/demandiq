@@ -496,9 +496,14 @@ async def line_diagram_endpoint(payload: dict):
             detail=f"view_mode must be one of {VIEW_MODES}",
         )
 
+    # Stage 10.4: optional free-text annotation, rendered as a caption strip.
+    annotation = payload.get("annotation")
+    if annotation is not None and not isinstance(annotation, str):
+        raise HTTPException(status_code=400, detail="annotation must be a string")
+
     try:
         png_bytes = render_single_diagram(intersection, u_vols, b_vols, view_mode,
-                                          overrides=overrides)
+                                          overrides=overrides, annotation=annotation)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"render failed: {e}")
 
