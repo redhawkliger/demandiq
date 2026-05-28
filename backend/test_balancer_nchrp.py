@@ -116,14 +116,36 @@ def test_3leg_t_intersection():
 
 
 # ─── Test 4a — under 'larger', every balanced movement stays >= raw ─────────
-def test_larger_never_below_raw():
-    """Under 'larger' resolution, link targets = max(count_up, count_down) ≥
-    both individual counts, so Furness only scales UP (modulo a small effect
-    from conservation normalization). Assert across a realistic 9-int corridor
-    with branching that no movement ends below its raw value.
-    NOTE: this asserts the engineering claim made in the spec — if the
-    conservation normalization step ever causes drops, this will FAIL
-    and force a follow-up decision."""
+def test_larger_conserves_links_movements_may_drop():
+    """Under 'larger', the guarantee that actually holds is LINK CONSERVATION,
+    not a per-movement floor.
+
+    The original spec claim ("larger ⇒ no movement below raw") is FALSE — it
+    confuses aggregate monotonicity with per-cell monotonicity. Resolved link
+    targets = max(count_up, count_down) only bound the directional TOTALS, and
+    even those can drop: per-intersection biproportional fitting (IPF) is a 2-D
+    proportional fit, and at boundary/end nodes the row-sum vs col-sum target
+    margins are INCONSISTENT. Concretely, at Int 1 (west end):
+
+        ROW targets (approaches): EB 1130, WB 990, NB 25, SB 25  → 2170
+        COL targets (exits):      EB 1150, WB 900, NB 120, SB 100 → 2270
+
+    The EB-exit column is raised to the resolved link (1→2,EB)=1150, but the
+    EB-approach row has no upstream link so it stays at raw 1130 — a +100
+    inconsistency the fit can't satisfy. It compromises, inflating EBT and
+    squeezing EBL/EBR/WBT below raw. This is correct NCHRP behavior; the drops
+    are surfaced to the engineer in the S7 review-drops UI for override. We do
+    NOT clamp them with a floor — NCHRP-FLOOR was removed in Stage 4b because a
+    floor reintroduces conservation violations.
+
+    Asserted (production path, round_to_5=True):
+      - no NCHRP-FLOOR flags (floor stays gone)
+      - every Full-mode link delta == 0 (post-round reconciliation, Stage 4c.3)
+    Surfaced, NOT asserted: count + sample of movements that ended below raw.
+
+    (NOTE: with round_to_5=False the reconciliation pass doesn't run, so
+    conservation is NOT enforced — that's why this asserts the real
+    production path rather than the raw pre-round IPF output.)"""
     coords = {n: {'lat': 0.0, 'lng': float(n)} for n in range(1, 10)}
     coords[6] = {'lat': 0.005, 'lng': 5.0}    # 6 is north of 5
     coords[5] = {'lat': 0.0, 'lng': 5.0}      # 5 stays at lng=5
@@ -144,33 +166,39 @@ def test_larger_never_below_raw():
               for a, b in [(1,2),(2,3),(3,4),(4,5),(5,7),(7,8),(8,9)]]
              + [{'fromNum': 5, 'toNum': 6, 'direction': 'NB/SB'}])
 
-    result = balance_nchrp(raw, links, method='larger', coords=coords,
-                           round_to_5=False)
+    # Production path — round_to_5=True runs the Stage 4c.3 reconciliation.
+    result = balance_nchrp(raw, links, method='larger', coords=coords)
     bal = result['balanced']
 
-    violations = []
-    for int_num, raw_vols in raw.items():
-        for mv, raw_val in raw_vols.items():
-            if raw_val > 0:
-                bv = bal[int_num].get(mv, 0)
-                if bv < raw_val - 1e-6:
-                    violations.append((int_num, mv, raw_val, bv))
-
+    # Floor must stay gone.
     floor_flags = [f for f in result['qc_flags'] if f['check'] == 'NCHRP-FLOOR']
     assert len(floor_flags) == 0, \
         f"NCHRP-FLOOR flags should no longer exist; found {len(floor_flags)}"
 
-    if violations:
-        # Don't hard-fail — print for visibility. Conservation normalization
-        # *can* cause small drops even under 'larger'. The user wants this
-        # surfaced explicitly rather than masked by a post-processing floor.
-        print(f"  test_larger_never_below_raw: SOFT-PASS (no floor + {len(violations)} small drops from normalization)")
-        for int_num, mv, raw_val, bv in violations[:5]:
-            print(f"    Int {int_num} {mv}: raw {raw_val} → balanced {bv:.2f}  (diff {raw_val - bv:+.2f})")
-        if len(violations) > 5:
-            print(f"    ... + {len(violations) - 5} more")
-    else:
-        print(f"  test_larger_never_below_raw: PASS (no movement below raw under Larger)")
+    # THE invariant: every Full-mode link conserves exactly (delta == 0).
+    full = [e for e in result['link_conservation'] if e.get('mode') == 'Full']
+    assert len(full) > 0, "expected Full-mode links to check"
+    nonzero = [e for e in full if abs(e['delta']) > 1e-9]
+    assert not nonzero, (
+        "Larger must conserve every Full link (delta == 0); nonzero: "
+        + ", ".join(f"{e['fromNum']}→{e['toNum']} {e['direction']} Δ={e['delta']:.2f}"
+                    for e in nonzero)
+    )
+
+    # Informational only: surface per-movement drops (engineer reviews these).
+    drops = []
+    for int_num, raw_vols in raw.items():
+        for mv, raw_val in raw_vols.items():
+            if raw_val > 0 and bal[int_num].get(mv, 0) < raw_val - 1e-6:
+                drops.append((int_num, mv, raw_val, bal[int_num].get(mv, 0)))
+
+    print(f"  test_larger_conserves_links_movements_may_drop: PASS "
+          f"({len(full)} Full links conserve exactly; "
+          f"{len(drops)} movements below raw — expected, surfaced in S7 review-drops)")
+    for int_num, mv, rv, bv in drops[:3]:
+        print(f"    Int {int_num} {mv}: raw {rv} → balanced {bv:.0f}")
+    if len(drops) > 3:
+        print(f"    ... + {len(drops) - 3} more (engineer reviews / overrides these)")
 
 
 # ─── Test 4b — under 'average', some movements CAN drop below raw ───────────
@@ -497,7 +525,7 @@ if __name__ == '__main__':
         test_furness_4x4_known_answer,
         test_link_resolution_larger_vs_average,
         test_3leg_t_intersection,
-        test_larger_never_below_raw,
+        test_larger_conserves_links_movements_may_drop,
         test_average_can_go_below_raw,
         test_end_to_end_3int_corridor,
         test_imbalanced_4x4_ipf,
