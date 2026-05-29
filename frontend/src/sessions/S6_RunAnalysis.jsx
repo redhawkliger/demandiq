@@ -258,7 +258,7 @@ export default function S6_RunAnalysis() {
               pmIters={pmIters}
               amConv={amConv}
               pmConv={pmConv}
-              maxIter={maxIter}
+              tol={balancing.convergenceThreshold ?? 0.01}
             />
           )}
 
@@ -353,54 +353,43 @@ function IntersectionConvergenceList({
   intersections,
   amIters, pmIters,
   amConv, pmConv,
-  maxIter,
+  tol,
 }) {
   const sorted = [...intersections].sort((a, b) => a.num - b.num)
   const total = sorted.length
   const amOk = sorted.filter((it) => amConv[String(it.num)]).length
   const pmOk = sorted.filter((it) => pmConv[String(it.num)]).length
 
-  const renderStatus = (period, iters, converged) => {
-    if (!converged) {
-      return (
-        <>
-          <span className="di-s6-conv__dot di-s6-conv__dot--fail" />
-          <span className="di-s6-conv__detail">
-            {period}: did NOT stabilize in {iters} iter (max iter reached)
-          </span>
-        </>
-      )
-    }
-    return (
-      <>
-        <span className="di-s6-conv__dot di-s6-conv__dot--ok" />
-        <span className="di-s6-conv__detail">{period}: converged in {iters} iter</span>
-      </>
-    )
+  // Iterations shown as AM (PM); status collapsed to one line per intersection.
+  const statusText = (am, pm) => {
+    if (am && pm) return `both converged${tol != null ? ` at ${tol} veh tol` : ''}`
+    if (!am && !pm) return 'neither converged (max iter)'
+    return `${am ? 'PM' : 'AM'} did not converge (max iter)`
   }
 
   return (
     <div className="di-s6-conv">
       <div className="di-s6-conv__head">
         <h3 className="di-s6-conv__title">Per-intersection convergence</h3>
-        <span className="di-s6-conv__summary">
-          AM {amOk}/{total} converged · PM {pmOk}/{total} converged
-        </span>
+        <span className="di-s6-conv__summary">AM {amOk}/{total} · PM {pmOk}/{total} converged</span>
       </div>
       <div className="di-s6-conv__list">
         {sorted.map((it) => {
           const n = String(it.num)
+          const am = !!amConv[n]
+          const pm = !!pmConv[n]
+          const ok = am && pm
           return (
-            <div key={it.id} className="di-s6-conv__row">
+            <div key={it.id} className="di-s6-conv__row di-s6-conv__row--inline">
               <div className="di-s6-conv__name">
                 <span className="di-s6-conv__num">{String(it.num).padStart(2, '0')}</span>
                 <span className="di-s6-conv__label">{it.name}</span>
               </div>
               <div className="di-s6-conv__cell">
-                {renderStatus('AM', amIters[n] ?? 0, !!amConv[n])}
-              </div>
-              <div className="di-s6-conv__cell">
-                {renderStatus('PM', pmIters[n] ?? 0, !!pmConv[n])}
+                <span className={`di-s6-conv__dot di-s6-conv__dot--${ok ? 'ok' : 'fail'}`} />
+                <span className="di-s6-conv__detail">
+                  {amIters[n] ?? 0} ({pmIters[n] ?? 0}) iter · {statusText(am, pm)}
+                </span>
               </div>
             </div>
           )
@@ -416,34 +405,25 @@ function IntersectionConvergenceList({
 // signal — non-zero deltas indicate the algorithm couldn't fully reconcile
 // adjacent counts.
 function LinkConservationTable({ am, pm }) {
-  const [period, setPeriod] = useState('AM')
-  const rows = period === 'AM' ? am : pm
-  const violations = rows.filter((r) => Math.abs(r.delta) > 0.5).length
+  // No period toggle — both periods are shown inline as AM (PM) per column.
+  const pmByKey = new Map(pm.map((r) => [`${r.fromNum}|${r.toNum}|${r.direction}`, r]))
+  const rows = am.map((a) => ({ a, p: pmByKey.get(`${a.fromNum}|${a.toNum}|${a.direction}`) ?? null }))
   const total = rows.length
+  const violations = rows.filter(({ a, p }) => Math.abs(a.delta) > 0.5 || (p && Math.abs(p.delta) > 0.5)).length
+
+  const n0 = (v) => (v == null ? '—' : v.toFixed(0))
+  const nDelta = (v) => (v == null ? '—' : `${v > 0 ? '+' : ''}${v.toFixed(1)}`)
 
   return (
     <div className="di-s6-lc">
       <div className="di-s6-lc__head">
         <h3 className="di-s6-lc__title">Link conservation</h3>
-        <div className="di-s6-lc__controls">
-          <span className="di-s6-lc__summary">
-            {violations === 0
-              ? `${total} links · all balanced ✓`
-              : `${total - violations}/${total} balanced · ${violations} with delta > 0.5 veh`}
-          </span>
-          <div className="di-s6-lc__period-toggle">
-            <button
-              type="button"
-              className={`di-s6-lc__period-btn${period === 'AM' ? ' di-s6-lc__period-btn--on' : ''}`}
-              onClick={() => setPeriod('AM')}
-            >AM</button>
-            <button
-              type="button"
-              className={`di-s6-lc__period-btn${period === 'PM' ? ' di-s6-lc__period-btn--on' : ''}`}
-              onClick={() => setPeriod('PM')}
-            >PM</button>
-          </div>
-        </div>
+        <span className="di-s6-lc__summary">
+          {violations === 0
+            ? `${total} links · all balanced ✓`
+            : `${total - violations}/${total} balanced · ${violations} with delta > 0.5 veh`}
+          {' · values AM (PM)'}
+        </span>
       </div>
       <table className="di-s6-lc__table">
         <thead>
@@ -456,19 +436,19 @@ function LinkConservationTable({ am, pm }) {
           </tr>
         </thead>
         <tbody>
-          {rows.map((r, i) => {
-            const ok = Math.abs(r.delta) <= 0.5
+          {rows.map(({ a, p }, i) => {
+            const ok = Math.abs(a.delta) <= 0.5 && (!p || Math.abs(p.delta) <= 0.5)
             return (
               <tr key={i} className={ok ? '' : 'di-s6-lc__row--warn'}>
-                <td>{r.fromNum} → {r.toNum}</td>
-                <td>{r.direction}</td>
-                <td style={{ textAlign: 'right' }}>{r.upstream_outflow.toFixed(0)}</td>
-                <td style={{ textAlign: 'right' }}>{r.downstream_inflow.toFixed(0)}</td>
+                <td>{a.fromNum} → {a.toNum}</td>
+                <td>{a.direction}</td>
+                <td style={{ textAlign: 'right' }}>{n0(a.upstream_outflow)} ({n0(p?.upstream_outflow)})</td>
+                <td style={{ textAlign: 'right' }}>{n0(a.downstream_inflow)} ({n0(p?.downstream_inflow)})</td>
                 <td
                   style={{ textAlign: 'right' }}
                   className={ok ? 'di-s6-lc__delta--ok' : 'di-s6-lc__delta--warn'}
                 >
-                  {r.delta > 0 ? '+' : ''}{r.delta.toFixed(1)}
+                  {nDelta(a.delta)} ({nDelta(p?.delta)})
                   {ok ? ' ✓' : ''}
                 </td>
               </tr>
@@ -492,22 +472,19 @@ function ResultsPanel({ lastRun, intersections }) {
 
   return (
     <div className="di-s6__right">
-      {/* Hero cards — per-intersection convergence ratios */}
+      {/* Hero strip — convergence as a single AM · PM line, plus QC */}
       <div className="di-s6-hero">
-        <HeroCard
-          num={`${amOk}/${total}`}
-          label="AM converged"
-          ok={amOk === total}
-          okText="All converged ✓"
-          warnText={`${total - amOk} did not converge ⚠`}
-        />
-        <HeroCard
-          num={`${pmOk}/${total}`}
-          label="PM converged"
-          ok={pmOk === total}
-          okText="All converged ✓"
-          warnText={`${total - pmOk} did not converge ⚠`}
-        />
+        <div className="di-s6-hero__card di-s6-hero__card--wide">
+          <div className="di-s6-hero__num di-s6-hero__num--inline">
+            AM {amOk}/{total} · PM {pmOk}/{total}
+          </div>
+          <div className="di-s6-hero__label">intersections converged</div>
+          <span className={`di-s6-hero__pill${amOk === total && pmOk === total ? '' : ' di-s6-hero__pill--warn'}`}>
+            {amOk === total && pmOk === total
+              ? 'All converged ✓'
+              : `${(total - amOk) + (total - pmOk)} did not converge ⚠`}
+          </span>
+        </div>
         <HeroCard
           num={qcFlags.length}
           label="QC flags"

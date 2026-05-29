@@ -144,6 +144,8 @@
   border: 1px solid var(--border);
   border-radius: 8px;
 }
+/* Inline variant: one status line per intersection (AM (PM) iter, no toggle) */
+.di-s6-conv__row--inline { grid-template-columns: minmax(160px, 1.3fr) 2fr; }
 .di-s6-conv__name { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
 .di-s6-conv__num {
   font-size: 11px;
@@ -358,10 +360,11 @@
 /* ── Hero cards (right panel) ────────────────────────────────────────── */
 .di-s6-hero {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: 2fr 1fr;   /* wide convergence strip + QC card */
   gap: 10px;
   margin-bottom: 20px;
 }
+.di-s6-hero__num--inline { font-size: 20px; }
 .di-s6-hero__card {
   background: var(--bg-base);
   border: 1px solid var(--border);

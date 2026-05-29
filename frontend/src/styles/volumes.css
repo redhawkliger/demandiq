@@ -191,7 +191,46 @@
 .di-up-file__remove:hover { color: var(--text-primary); background: var(--bg-hover); }
 
 /* ── Volume grid ─────────────────────────────────────────────────────── */
-.di-vol-wrap { width: 100%; }
+.di-vol-wrap { width: 100%; display: flex; flex-direction: column; gap: 18px; }
+
+/* ── Transposed per-intersection volume card (movement rows × AM/PM cols) ── */
+.di-vol-int {
+  max-width: 460px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.di-vol-int__head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 10px 14px;
+  background: var(--bg-elevated);
+  border-bottom: 1px solid var(--border);
+}
+.di-vol-grid--mvt { width: 100%; table-layout: fixed; }
+.di-vol-th--mvt { text-align: left; padding-left: 14px; width: 38%; }
+.di-vol-th--val { text-align: right; padding-right: 14px; }
+.di-vol-td--mvt {
+  text-align: left;
+  padding-left: 14px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+.di-vol-dir td.di-vol-dir,
+td.di-vol-dir {
+  text-align: left;
+  padding: 4px 14px;
+  height: 24px;
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text-tertiary);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-weight: 600;
+}
+.di-vol-scalar-row .di-vol-td--mvt { color: var(--text-tertiary); }
 .di-vol-grid {
   border-collapse: separate;
   border-spacing: 0;

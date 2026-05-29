@@ -19,7 +19,7 @@ const DEFAULTS = () => ({
   date: todayISO(),
   scenario: 'Existing',
   projectType: null,
-  analysisPeriods: [],
+  analysisPeriods: ['AM', 'PM'],   // default both; AM/PM toggle independently
 })
 
 const PROJECT_TYPES = ['Corridor', 'Zone', 'Single Intersection']
@@ -62,14 +62,7 @@ export default function S1_ProjectSetup() {
       return { ...f, analysisPeriods: PERIODS.filter((x) => set.has(x)) }
     })
 
-  const setBoth = () =>
-    setForm((f) => {
-      const both = f.analysisPeriods.length === 2
-      return { ...f, analysisPeriods: both ? [] : ['AM', 'PM'] }
-    })
-
   const isValid = validate(form)
-  const bothSelected = form.analysisPeriods.length === 2
 
   const handleSubmit = (e) => {
     e.preventDefault()
@@ -165,14 +158,11 @@ export default function S1_ProjectSetup() {
                 </button>
               )
             })}
-            <button
-              type="button"
-              aria-pressed={bothSelected}
-              className={`di-pill${bothSelected ? ' di-pill--selected' : ''}`}
-              onClick={setBoth}
-            >
-              Both
-            </button>
+            {form.analysisPeriods.length === 2 && (
+              <span className="di-help" style={{ alignSelf: 'center', marginTop: 0 }}>
+                AM + PM
+              </span>
+            )}
           </div>
         </div>
 
