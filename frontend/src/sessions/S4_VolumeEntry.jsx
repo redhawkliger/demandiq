@@ -447,7 +447,12 @@ function BulkPasteModal({ intersections, onClose }) {
 
   const onApply = () => {
     const stats = applyParsedRows(parsed.rows, { setCellValue, setPhf, setHvPct })
-    setApplied(stats)
+    setApplied({
+      ...stats,
+      totalRows: parsed.totalDataRows,
+      importedRows: parsed.applicableRows,
+      skippedRows: parsed.skippedRows,
+    })
   }
 
   return (
@@ -465,18 +470,24 @@ function BulkPasteModal({ intersections, onClose }) {
         <div className="di-modal__body">
           {applied ? (
             <div className="di-banner">
-              Applied {applied.cells} value{applied.cells === 1 ? '' : 's'} across{' '}
+              Imported {applied.importedRows} of {applied.totalRows} row
+              {applied.totalRows === 1 ? '' : 's'}
+              {applied.skippedRows > 0 ? `, ${applied.skippedRows} skipped` : ''} —
+              wrote {applied.cells} value{applied.cells === 1 ? '' : 's'} across{' '}
               {applied.intersections} intersection{applied.intersections === 1 ? '' : 's'}.
               Pasted values are tagged as manual entries in the grid.
             </div>
           ) : (
             <>
               <p className="di-paste__hint">
-                Paste rows copied from Excel / Google Sheets. The first row must be a
-                header. Match columns by name — <code>Int#</code> and <code>Period</code>{' '}
-                are required; movement columns are any of{' '}
-                <code>{MOVEMENT_CODES.join(', ')}</code>; <code>PHF</code> and{' '}
-                <code>HV</code> are optional. Blank cells are left untouched.
+                Paste rows copied from Excel / Google Sheets. Header row optional;
+                columns are matched by name when present. <code>Int#</code> and{' '}
+                <code>Period</code> are required for multi-intersection paste; movement
+                columns are any of <code>{MOVEMENT_CODES.join(', ')}</code>, or a{' '}
+                <code>Mvt</code>/<code>Direction</code> column with{' '}
+                <code>LT</code>/<code>TH</code>/<code>RT</code>. Values may include{' '}
+                <code>K</code>-suffixes (<code>1.2K</code> → 1200). One bad row is
+                flagged inline — the rest still import.
               </p>
               <button
                 type="button"
