@@ -520,6 +520,140 @@ def test_fractional_volume_flag():
     print(f"  test_fractional_volume_flag: PASS (1 flag on WBT 102.5, 0 on clean)")
 
 
+# ─── Test 12 — GEOMETRY-FALLBACK qc_flag emission (PRD-05) ──────────────────
+def test_geometry_fallback_no_emission_when_coords_distinct():
+    """Bodger-shaped fixture (distinct coords): zero GEOMETRY-FALLBACK flags.
+    Verifies the flag fires only on coord degeneracy, not on every balance run."""
+    vols = {
+        1: mk({'EBT': 250, 'SBL': 14}),
+        2: mk({'EBL': 30, 'EBT': 120, 'EBR': 14}),
+    }
+    links = [{'fromNum': 1, 'toNum': 2, 'direction': 'EB/WB', 'mode': 'Full'}]
+    coords = {1: {'lat': 40.0, 'lng': -75.0},
+              2: {'lat': 40.0, 'lng': -74.99}}   # ~0.01 deg apart, ~1 km
+
+    fallbacks = []
+    resolve_link_volumes(vols, links, method='larger', coords=coords,
+                         geometry_fallbacks=fallbacks)
+    assert fallbacks == [], f"expected no fallbacks; got {fallbacks}"
+
+    result = balance_nchrp(vols, links, method='larger', coords=coords)
+    geom_flags = [f for f in result['qc_flags'] if f['check'] == 'GEOMETRY-FALLBACK']
+    assert geom_flags == [], f"expected no GEOMETRY-FALLBACK; got {geom_flags}"
+    print(f"  test_geometry_fallback_no_emission_when_coords_distinct: PASS")
+
+
+def test_geometry_fallback_fires_on_coincident_coords():
+    """Two intersections at identical lat/lng on an EB/WB link: exactly one
+    GEOMETRY-FALLBACK flag, message names both int numbers, period=None."""
+    vols = {
+        1: mk({'EBT': 250}),
+        2: mk({'EBT': 120}),
+    }
+    links = [{'fromNum': 1, 'toNum': 2, 'direction': 'EB/WB', 'mode': 'Full'}]
+    coords = {1: {'lat': 40.0, 'lng': -75.0},
+              2: {'lat': 40.0, 'lng': -75.0}}   # identical → ambiguous
+
+    fallbacks = []
+    resolve_link_volumes(vols, links, method='larger', coords=coords,
+                         geometry_fallbacks=fallbacks)
+    assert fallbacks == [(1, 2)], f"expected [(1,2)]; got {fallbacks}"
+
+    # Within epsilon (1e-7 < 1e-6): still flagged
+    coords_near = {1: {'lat': 40.0, 'lng': -75.0},
+                   2: {'lat': 40.0 + 1e-7, 'lng': -75.0 + 1e-7}}
+    fallbacks_near = []
+    resolve_link_volumes(vols, links, method='larger', coords=coords_near,
+                         geometry_fallbacks=fallbacks_near)
+    assert fallbacks_near == [(1, 2)], f"epsilon-equal coords should flag; got {fallbacks_near}"
+
+    result = balance_nchrp(vols, links, method='larger', coords=coords)
+    geom_flags = [f for f in result['qc_flags'] if f['check'] == 'GEOMETRY-FALLBACK']
+    assert len(geom_flags) == 1, f"expected 1 flag; got {len(geom_flags)}: {geom_flags}"
+    f = geom_flags[0]
+    assert f['period'] is None, f"period should be None; got {f['period']!r}"
+    assert f['fromNum'] == 1 and f['toNum'] == 2, f
+    assert '1' in f['message'] and '2' in f['message'], f"message must name both ints: {f['message']!r}"
+    assert '↔' in f['message'], f"message format check: {f['message']!r}"
+    print(f"  test_geometry_fallback_fires_on_coincident_coords: PASS")
+    print(f"    message: {f['message']}")
+
+
+def test_geometry_fallback_one_per_link_not_per_int():
+    """Three intersections, 2 share coords with each adjacent neighbor on
+    DIFFERENT pairs: exactly one flag per affected link, never per int."""
+    vols = {
+        1: mk({'EBT': 200}),
+        2: mk({'EBT': 180, 'EBL': 0}),
+        3: mk({'EBT': 150}),
+    }
+    links = [
+        {'fromNum': 1, 'toNum': 2, 'direction': 'EB/WB', 'mode': 'Full'},
+        {'fromNum': 2, 'toNum': 3, 'direction': 'EB/WB', 'mode': 'Full'},
+    ]
+    # 1 and 2 share coords (ambiguous); 3 is distinct (resolves cleanly)
+    coords = {
+        1: {'lat': 40.0, 'lng': -75.0},
+        2: {'lat': 40.0, 'lng': -75.0},
+        3: {'lat': 40.0, 'lng': -74.98},
+    }
+    fallbacks = []
+    resolve_link_volumes(vols, links, method='larger', coords=coords,
+                         geometry_fallbacks=fallbacks)
+    assert fallbacks == [(1, 2)], f"expected only (1,2); got {fallbacks}"
+
+    # Now degenerate BOTH links (1-2 and 2-3 share with neighbors).
+    coords_two_bad = {
+        1: {'lat': 40.0, 'lng': -75.0},
+        2: {'lat': 40.0, 'lng': -75.0},
+        3: {'lat': 40.0, 'lng': -75.0},
+    }
+    fallbacks2 = []
+    resolve_link_volumes(vols, links, method='larger', coords=coords_two_bad,
+                         geometry_fallbacks=fallbacks2)
+    assert set(fallbacks2) == {(1, 2), (2, 3)}, f"expected 2 distinct pairs; got {fallbacks2}"
+    assert len(fallbacks2) == 2, f"each pair only once: {fallbacks2}"
+    print(f"  test_geometry_fallback_one_per_link_not_per_int: PASS")
+
+
+def test_geometry_fallback_deduped_across_am_pm():
+    """Same coord-sharing fixture exercised through the /balance-nchrp app
+    layer with both AM and PM data: GEOMETRY-FALLBACK appears exactly once,
+    not twice (deduped across periods because geometry doesn't change)."""
+    from fastapi.testclient import TestClient
+    from app import app
+
+    payload = {
+        "intersections": [
+            {"num": 1, "lat": 40.0, "lng": -75.0},
+            {"num": 2, "lat": 40.0, "lng": -75.0},   # coincident with 1
+        ],
+        "unbalanced_volumes": {
+            "AM": {
+                "1": {"EBT": 250},
+                "2": {"EBT": 120},
+            },
+            "PM": {
+                "1": {"EBT": 300},
+                "2": {"EBT": 140},
+            },
+        },
+        "links": [
+            {"fromNum": 1, "toNum": 2, "direction": "EB/WB", "mode": "Full"},
+        ],
+        "link_resolution_method": "larger",
+    }
+    client = TestClient(app)
+    r = client.post("/balance-nchrp", json=payload)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    geom = [f for f in body['qc_flags'] if f['check'] == 'GEOMETRY-FALLBACK']
+    assert len(geom) == 1, f"expected exactly 1 GEOMETRY-FALLBACK after dedup; got {len(geom)}: {geom}"
+    assert geom[0]['period'] is None, f"period should be None corridor-wide; got {geom[0]['period']!r}"
+    assert geom[0]['fromNum'] == 1 and geom[0]['toNum'] == 2
+    print(f"  test_geometry_fallback_deduped_across_am_pm: PASS (1 flag covers AM + PM)")
+
+
 if __name__ == '__main__':
     tests = [
         test_furness_4x4_known_answer,
@@ -533,6 +667,10 @@ if __name__ == '__main__':
         test_movements_review_present,
         test_all_movements_present,
         test_fractional_volume_flag,
+        test_geometry_fallback_no_emission_when_coords_distinct,
+        test_geometry_fallback_fires_on_coincident_coords,
+        test_geometry_fallback_one_per_link_not_per_int,
+        test_geometry_fallback_deduped_across_am_pm,
     ]
     passed = 0
     failed = 0

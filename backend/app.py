@@ -417,10 +417,31 @@ async def balance_nchrp_endpoint(payload: dict):
     # RAW inputs, before balancing). Surfaced alongside the NCHRP-* flags.
     qc_all += fractional_volume_flags(am_raw, period='AM')
     qc_all += fractional_volume_flags(pm_raw, period='PM')
+
+    # GEOMETRY-FALLBACK is corridor-level (geometry, not volumes) — AM and PM
+    # share the same coords + links, so the flag would repeat. Dedupe by
+    # (fromNum, toNum) and stamp period only on flags that didn't already
+    # set one (flags with explicit period=None, like GEOMETRY-FALLBACK, are
+    # left as-is so S6 renders them once corridor-wide).
+    seen_geometry_pairs = set()
+
+    def _append_flag(f, default_period):
+        if f.get('check') == 'GEOMETRY-FALLBACK':
+            pair = (f.get('fromNum'), f.get('toNum'))
+            if pair in seen_geometry_pairs:
+                return
+            seen_geometry_pairs.add(pair)
+            qc_all.append(dict(f))
+            return
+        if 'period' in f:
+            qc_all.append(dict(f))
+        else:
+            qc_all.append({**f, 'period': default_period})
+
     for f in am_result['qc_flags']:
-        qc_all.append({**f, 'period': 'AM'})
+        _append_flag(f, 'AM')
     for f in pm_result['qc_flags']:
-        qc_all.append({**f, 'period': 'PM'})
+        _append_flag(f, 'PM')
 
     return {
         "balanced": {
