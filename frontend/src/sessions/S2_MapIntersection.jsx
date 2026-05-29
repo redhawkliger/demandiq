@@ -80,11 +80,14 @@ export default function S2_MapIntersection() {
   // 'edit'  → existing editing/intersections UX, direction-coded link colors
   // 'pre'   → pre-balance flow map (raw outflow/inflow)
   // 'post'  → post-balance flow map (override-or-balanced + resolved)
-  // Default: 'post' if a lastRun exists, else 'pre'.
+  // Default: 'edit' on an empty project (the flow views are read-only, so the
+  // map must be clickable to drop the first pin), else 'post' if a lastRun
+  // exists, else 'pre'.
   // The S7 "View flow map" button passes ?view=post on navigation.
   const initialViewMode = () => {
     const q = searchParams.get('view')
     if (q === 'pre' || q === 'post' || q === 'edit') return q
+    if (intersections.length === 0) return 'edit'
     return lastRun ? 'post' : 'pre'
   }
   const [viewMode, setViewMode] = useState(initialViewMode)
