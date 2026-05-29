@@ -165,9 +165,13 @@ export default function S8_Export() {
   const intCount = intersections.length
   const corridor = balancing.corridorDir ?? snap.analysis?.corridorDir ?? '—'
   const convPct = ((balancing.convergenceThreshold ?? 0.01) * 100).toFixed(1)
-  const amConv = lastRun?.convergence?.AM
-  const pmConv = lastRun?.convergence?.PM
-  const convergedCount = (amConv?.converged ? 1 : 0) + (pmConv?.converged ? 1 : 0)
+  // Convergence is per-intersection. Read the SAME field S6 reports from
+  // (lastRun.intConverged); the old code read lastRun.convergence — a field the
+  // balancer never returns — so the export header always showed "0/2 converged"
+  // and contradicted S6's per-intersection ratio.
+  const intConverged = lastRun?.intConverged ?? { AM: {}, PM: {} }
+  const amOk = intersections.filter((it) => intConverged.AM?.[String(it.num)]).length
+  const pmOk = intersections.filter((it) => intConverged.PM?.[String(it.num)]).length
   const qcCount = lastRun?.qcFlags?.length ?? 0
 
   return (
@@ -186,7 +190,7 @@ export default function S8_Export() {
               <SumRow k="Date"          v={project.date || '—'} />
               <SumRow k="Scenario"      v={project.scenario || '—'} />
               <SumRow k="Corridor"      v={corridor === 'EW' ? 'EB/WB' : corridor === 'NS' ? 'NB/SB' : corridor} />
-              <SumRow k="Convergence"   v={`${convPct}% (${convergedCount}/2 converged)`} />
+              <SumRow k="Convergence"   v={`AM ${amOk}/${intCount} · PM ${pmOk}/${intCount} (${convPct}% threshold)`} />
               <SumRow k="QC"            v={qcCount === 0 ? 'Clean' : `${qcCount} flag${qcCount === 1 ? '' : 's'}`} />
             </div>
           </div>
