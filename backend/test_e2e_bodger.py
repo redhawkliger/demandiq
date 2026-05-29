@@ -161,8 +161,8 @@ def test_excel_export():
     assert isinstance(xlsx, (bytes, bytearray)) and len(xlsx) > 0, "workbook bytes empty"
 
     wb = load_workbook(io.BytesIO(xlsx), data_only=True)
-    for sheet in ('Project Info', 'AM Balanced', 'PM Balanced', 'Combined View', 'QC Flags'):
-        assert sheet in wb.sheetnames, f"missing sheet {sheet}; have {wb.sheetnames}"
+    # PRD-02: workbook is 3 tabs — Provenance / Combined View / Raw Movements.
+    assert wb.sheetnames == ['Provenance', 'Combined View', 'Raw Movements'], wb.sheetnames
 
     # Spot-check a Combined View row: AM Δ == AM Balanced − AM Raw
     ws = wb['Combined View']
