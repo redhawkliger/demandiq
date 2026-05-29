@@ -25,11 +25,28 @@ function _initSnapshot() {
     _snapshot = {}
   }
   _initialized = true
+
+  let mutated = false
+
+  // Self-heal corrupted snapshots: intersections may have been cleared while
+  // links / lastRun / balancing modes still reference dead UUIDs. That state
+  // silently breaks add-intersection and reset, so strip orphan refs on load
+  // and warn — surfacing the corruption in any future diagnostics dump rather
+  // than hiding it behind a broken UI.
+  const reconciled = reconcileDependents(_snapshot)
+  if (reconciled.changed) {
+    _snapshot = reconciled.state
+    mutated = true
+    console.warn(`DemandIQ: self-healed project state on load — ${summarizeReconcile(reconciled.summary)}.`)
+  }
+
   // Old projects (pre-links model) get default consecutive links generated
   // once, here at load time. Run-once: gated on links being empty/absent AND
   // intersections ≥ 2 — so this never re-fires after init for the same load,
   // and is skipped when the user already has links.
-  if (_migrateLinksIfNeeded()) _persist()
+  if (_migrateLinksIfNeeded()) mutated = true
+
+  if (mutated) _persist()
 }
 
 // Internal link-ID generator. Matches the intersection ID style (crypto.randomUUID
@@ -85,6 +102,134 @@ function _migrateLinksIfNeeded() {
   return true
 }
 
+// ── State integrity: cascade-clean orphan references ──────────────────────────
+// A snapshot can drift into an inconsistent state where dependent collections
+// reference intersection ids/nums that no longer exist — e.g. intersections
+// cleared while `links`, `analysis.lastRun`, and `balancing.linkBalanceModes`
+// still point at dead UUIDs. That state silently breaks add-intersection and
+// makes reset hard to reach. reconcileDependents prunes every dependent slice so
+// the snapshot is internally consistent again.
+//
+// Pure: takes a snapshot, returns { state, summary, changed }. Touches no
+// localStorage and no module globals, so it's reused by both setIntersections
+// (on removal) and _initSnapshot (self-heal on load), and is unit-testable.
+
+// A linkBalanceModes key is "live" if it's a surviving link id, OR a composite
+// `<intId>__<intId>` pair (the scheme ensureBalancingDefaults uses) whose both
+// halves survive. Anything else references a dropped link/intersection.
+function _isLiveModeKey(key, liveLinkIds, intIds) {
+  if (liveLinkIds.has(key)) return true
+  if (key.includes('__')) {
+    const [a, b] = key.split('__')
+    return intIds.has(a) && intIds.has(b)
+  }
+  return false
+}
+
+// lastRun is stale if it references any intersection num that no longer exists,
+// or if there are no intersections at all (every ref is dead by definition).
+function _lastRunReferencesMissing(lastRun, intNums) {
+  if (intNums.size === 0) return true
+  const pairs = [
+    ...(lastRun.resolvedLinks?.AM ?? []),
+    ...(lastRun.resolvedLinks?.PM ?? []),
+  ]
+  for (const r of pairs) {
+    if (!intNums.has(String(r.fromNum)) || !intNums.has(String(r.toNum))) return true
+  }
+  return false
+}
+
+export function reconcileDependents(state) {
+  const summary = {
+    removedLinks: 0,
+    removedLinkModes: 0,
+    removedOverrides: 0,
+    clearedLastRun: false,
+  }
+  if (!state || typeof state !== 'object') return { state, summary, changed: false }
+
+  const intersections = state.intersections ?? []
+  const intIds = new Set(intersections.map((it) => it.id))
+  const intNums = new Set(intersections.map((it) => String(it.num)))
+
+  let next = state
+
+  // 1. Drop links whose endpoints no longer exist.
+  const links = state.links ?? []
+  const liveLinks = links.filter((l) => intIds.has(l.fromId) && intIds.has(l.toId))
+  if (liveLinks.length !== links.length) {
+    summary.removedLinks = links.length - liveLinks.length
+    next = { ...next, links: liveLinks }
+  }
+  const liveLinkIds = new Set(liveLinks.map((l) => l.id))
+
+  // 2 + 3. Prune balancing.linkBalanceModes (dead links) and balancing.overrides
+  // (dead intersection nums) — keyed independently, so handle both.
+  const bal = next.balancing
+  if (bal && typeof bal === 'object') {
+    let balNext = bal
+
+    if (bal.linkBalanceModes && typeof bal.linkBalanceModes === 'object') {
+      const kept = {}
+      let removed = 0
+      for (const [key, val] of Object.entries(bal.linkBalanceModes)) {
+        if (_isLiveModeKey(key, liveLinkIds, intIds)) kept[key] = val
+        else removed++
+      }
+      if (removed > 0) {
+        summary.removedLinkModes = removed
+        balNext = { ...balNext, linkBalanceModes: kept }
+      }
+    }
+
+    if (bal.overrides && typeof bal.overrides === 'object') {
+      let removed = 0
+      const cleanPeriod = (periodMap) => {
+        if (!periodMap || typeof periodMap !== 'object') return periodMap ?? {}
+        const out = {}
+        for (const [numStr, mvs] of Object.entries(periodMap)) {
+          if (intNums.has(numStr)) out[numStr] = mvs
+          else removed++
+        }
+        return out
+      }
+      const nextOverrides = {
+        AM: cleanPeriod(bal.overrides.AM),
+        PM: cleanPeriod(bal.overrides.PM),
+      }
+      if (removed > 0) {
+        summary.removedOverrides = removed
+        balNext = { ...balNext, overrides: nextOverrides }
+      }
+    }
+
+    if (balNext !== bal) next = { ...next, balancing: balNext }
+  }
+
+  // 4. Clear stale lastRun: when it references a now-missing intersection num,
+  // or when any link was dropped (its directed pairs are no longer trustworthy).
+  const lastRun = next.analysis?.lastRun ?? null
+  if (lastRun && (_lastRunReferencesMissing(lastRun, intNums) || summary.removedLinks > 0)) {
+    next = { ...next, analysis: { ...next.analysis, lastRun: null } }
+    summary.clearedLastRun = true
+  }
+
+  return { state: next, summary, changed: next !== state }
+}
+
+// One-line, human-readable summary of what reconcileDependents stripped — used
+// for the self-heal console.warn so corruption surfaces in any diagnostics dump.
+export function summarizeReconcile(summary) {
+  const plural = (n) => (n === 1 ? '' : 's')
+  const parts = []
+  if (summary.removedLinks) parts.push(`removed ${summary.removedLinks} orphan link${plural(summary.removedLinks)}`)
+  if (summary.removedLinkModes) parts.push(`removed ${summary.removedLinkModes} stale link balance mode${plural(summary.removedLinkModes)}`)
+  if (summary.removedOverrides) parts.push(`removed ${summary.removedOverrides} orphan override${plural(summary.removedOverrides)}`)
+  if (summary.clearedLastRun) parts.push('cleared lastRun')
+  return parts.join(', ')
+}
+
 function _emit() {
   for (const listener of _listeners) listener()
 }
@@ -123,7 +268,22 @@ export function getIntersections() {
 
 export function setIntersections(list) {
   if (!_initialized) _initSnapshot()
-  _snapshot = { ..._snapshot, intersections: list }
+  const prevIds = new Set((_snapshot.intersections ?? []).map((it) => it.id))
+  const nextIds = new Set(list.map((it) => it.id))
+  const removedAny = [...prevIds].some((id) => !nextIds.has(id))
+
+  let nextState = { ..._snapshot, intersections: list }
+  // Spec: removing/clearing ANY previously-present intersection invalidates the
+  // last analysis run — its int refs are stale even if the survivors still
+  // cover them. reconcileDependents also clears lastRun on orphaned refs, but
+  // this catches removals where the survivors happen to still satisfy it.
+  if (removedAny && nextState.analysis?.lastRun) {
+    nextState = { ...nextState, analysis: { ...nextState.analysis, lastRun: null } }
+  }
+  // Cascade-clean dependents: orphan links, stale linkBalanceModes, overrides.
+  nextState = reconcileDependents(nextState).state
+
+  _snapshot = nextState
   _persist()
   _emit()
 }

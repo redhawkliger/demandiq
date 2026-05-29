@@ -18,6 +18,7 @@ import {
   addLink,
   removeLink,
   updateLink,
+  clearProject,
 } from '../store/projectStore'
 import { reverseGeocode } from '../lib/photon'
 import {
@@ -53,6 +54,10 @@ export default function S2_MapIntersection() {
   //   { mode: 'add' | 'edit', num, initial, pendingPin?, geocodeName?,
   //     geocodeFailed, skewDeg?, editIndex? }
   const [modal, setModal] = useState(null)
+  // Surfaces an add-intersection failure as a visible banner instead of failing
+  // silently (root-cause state corruption is fixed in the store; this is the
+  // last-resort guard so a future throw can never swallow itself).
+  const [addError, setAddError] = useState(null)
 
   // ── Stage 2: link drawing mode ─────────────────────────────────────
   // mapMode: 'intersections' (default — current behavior) | 'links'
@@ -180,26 +185,37 @@ export default function S2_MapIntersection() {
   }
 
   const handleConfirm = (form) => {
-    if (modal.mode === 'add') {
-      setIntersections([
-        ...intersections,
-        {
-          id: newId(),
-          num: modal.num,
-          lat: modal.pendingPin.lat,
-          lng: modal.pendingPin.lng,
-          ...form,
-        },
-      ])
-    } else {
-      const next = [...intersections]
-      next[modal.editIndex] = { ...next[modal.editIndex], ...form }
-      setIntersections(next)
+    try {
+      if (modal.mode === 'add') {
+        setIntersections([
+          ...intersections,
+          {
+            id: newId(),
+            num: modal.num,
+            lat: modal.pendingPin.lat,
+            lng: modal.pendingPin.lng,
+            ...form,
+          },
+        ])
+      } else {
+        const next = [...intersections]
+        next[modal.editIndex] = { ...next[modal.editIndex], ...form }
+        setIntersections(next)
+      }
+      setAddError(null)
+      setModal(null)
+    } catch (err) {
+      setAddError(err?.message || String(err))
     }
-    setModal(null)
   }
 
-  const handleCancel = () => setModal(null)
+  const handleCancel = () => { setAddError(null); setModal(null) }
+
+  const handleResetProject = () => {
+    clearProject()
+    // Hard reload so every session's component-local state is cleared cleanly.
+    window.location.assign('/')
+  }
 
   const handleRemove = (idx) => {
     const next = intersections
@@ -346,6 +362,53 @@ export default function S2_MapIntersection() {
   return (
     <div className="di-s2">
       <div className="di-s2__map" ref={mapWrapperRef}>
+        {addError && (
+          <div
+            className="di-banner"
+            role="alert"
+            style={{
+              position: 'absolute',
+              top: 12,
+              left: '50%',
+              transform: 'translateX(-50%)',
+              zIndex: 1200,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 12,
+              maxWidth: 560,
+              background: 'rgba(255, 107, 107, 0.1)',
+              borderColor: 'rgba(255, 107, 107, 0.4)',
+              color: '#FF8B8B',
+            }}
+          >
+            <AlertTriangle size={14} style={{ flexShrink: 0 }} />
+            <span style={{ flex: 1 }}>Failed to add intersection: {addError}</span>
+            <button
+              type="button"
+              className="di-btn-secondary"
+              style={{ height: 30, padding: '0 12px', fontSize: 12 }}
+              onClick={handleResetProject}
+            >
+              Reset project
+            </button>
+            <button
+              type="button"
+              aria-label="Dismiss"
+              onClick={() => setAddError(null)}
+              style={{
+                background: 'none',
+                border: 'none',
+                color: 'inherit',
+                cursor: 'pointer',
+                fontSize: 18,
+                lineHeight: 1,
+                padding: '0 2px',
+              }}
+            >
+              ×
+            </button>
+          </div>
+        )}
         <div className="di-s2-mode">
           <button
             type="button"
