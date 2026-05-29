@@ -32,7 +32,14 @@ from openpyxl.styles import Font, Alignment, PatternFill
 from count_agent import extract, MOVEMENTS
 from balancer import balance_corridor, run_qc
 from balancer import balance_nchrp, fractional_volume_flags
-from line_diagram import render_single_diagram, render_diagram_grid, VIEW_MODES, FIG_INCHES, DPI
+from line_diagram import (
+    render_single_diagram,
+    render_diagram_grid,
+    render_corridor_diagram,
+    VIEW_MODES,
+    FIG_INCHES,
+    DPI,
+)
 from excel_export import build_workbook
 
 # ── Config ────────────────────────────────────────────────────────────────────
@@ -572,6 +579,158 @@ async def export_diagram_grid_endpoint(payload: dict):
         media_type="image/png",
         headers={"Content-Disposition": 'attachment; filename="demandiq_diagrams.png"'},
     )
+
+
+@app.post("/corridor-diagram", dependencies=[Depends(require_auth)])
+async def corridor_diagram_endpoint(payload: dict):
+    """PRD-03: render the corridor's two line-diagram figures (AM + PM) with
+    per-segment link-volume labels between adjacent intersections.
+
+    Returns both image bytes in one round-trip — base64 inside JSON so the
+    frontend can drop each into an <img src=...> and bundle both into the
+    Excel/zip export without an extra fetch.
+
+    Payload:
+      {
+        "cells": [ {"intersection": {...geo}, "u_vols": {}, "b_vols": {},
+                    "overrides": {} }, ... ],            # in corridor order
+        "resolved_links": {
+            "AM": [{"fromNum","toNum","direction","volume"}, ...],
+            "PM": [...],
+        },
+        "corridor_dir": "EB/WB" | "NB/SB",
+        "view_mode": "combined" | "balanced" | "unbalanced" | "delta",
+        "cols": int,                # optional, default 3
+        "title": str,               # optional banner (rendered on BOTH figures)
+        "b_vols": {                 # optional; if provided overrides cell.b_vols
+            "AM": {num_str: {mv: val}}, "PM": {...}
+        }
+      }
+    Returns:
+      { "am": {png_base64, width, height}, "pm": {...},
+        "segment_counts": {"AM": int, "PM": int}  // count of segment labels drawn,
+                                                  // for FE/QA visibility
+      }
+    """
+    cells_in = payload.get("cells")
+    if not isinstance(cells_in, list) or not cells_in:
+        raise HTTPException(status_code=400, detail="cells must be a non-empty list")
+
+    view_mode = payload.get("view_mode", "combined")
+    if view_mode not in VIEW_MODES:
+        raise HTTPException(status_code=400, detail=f"view_mode must be one of {VIEW_MODES}")
+
+    corridor_dir = payload.get("corridor_dir")
+    if corridor_dir not in ("EB/WB", "NB/SB"):
+        raise HTTPException(
+            status_code=400,
+            detail="corridor_dir must be 'EB/WB' or 'NB/SB'",
+        )
+
+    resolved_in = payload.get("resolved_links") or {}
+    if not isinstance(resolved_in, dict):
+        raise HTTPException(status_code=400, detail="resolved_links must be a dict")
+    am_resolved = resolved_in.get("AM") or []
+    pm_resolved = resolved_in.get("PM") or []
+    if not isinstance(am_resolved, list) or not isinstance(pm_resolved, list):
+        raise HTTPException(
+            status_code=400,
+            detail="resolved_links.AM and resolved_links.PM must be lists",
+        )
+
+    cols = payload.get("cols", 3)
+    try:
+        cols = int(cols)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="cols must be an integer")
+
+    title = payload.get("title")
+
+    # Optional per-period balanced volumes — when provided, replace the
+    # cell-level b_vols so AM and PM figures differ on the per-cell numbers
+    # too (not just the segment labels). The frontend always sends both.
+    period_b_vols = payload.get("b_vols") or {}
+    am_b = period_b_vols.get("AM") or {}
+    pm_b = period_b_vols.get("PM") or {}
+
+    def _build_cells(period_b):
+        out = []
+        for c in cells_in:
+            if not isinstance(c, dict):
+                raise HTTPException(status_code=400, detail="each cell must be a dict")
+            geo = c.get("intersection")
+            if not isinstance(geo, dict) or "num" not in geo:
+                raise HTTPException(status_code=400, detail="each cell.intersection needs 'num'")
+            num_str = str(geo["num"])
+            b_vols = period_b.get(num_str) if period_b else None
+            out.append({
+                "geo": geo,
+                "u_vols": c.get("u_vols") or {},
+                "b_vols": b_vols if b_vols is not None else (c.get("b_vols") or {}),
+                "overrides": c.get("overrides") or {},
+            })
+        return out
+
+    try:
+        am_cells = _build_cells(am_b)
+        pm_cells = _build_cells(pm_b)
+        am_png = render_corridor_diagram(
+            am_cells, am_resolved, corridor_dir, "AM",
+            view_mode=view_mode, cols=cols, title=title,
+        )
+        pm_png = render_corridor_diagram(
+            pm_cells, pm_resolved, corridor_dir, "PM",
+            view_mode=view_mode, cols=cols, title=title,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"corridor render failed: {e}")
+
+    # segment-label counts: one per same-row adjacent pair that found a
+    # matching resolved-link entry. Useful for the AC test + FE QA.
+    def _count_segments(cells, resolved):
+        from line_diagram import _segment_label_for_pair as _seg
+        n_cells = len(cells)
+        cols_eff = max(1, min(int(cols), n_cells))
+        c = 0
+        for i in range(n_cells - 1):
+            if (i // cols_eff) != ((i + 1) // cols_eff):
+                continue
+            t, _ = _seg(
+                int(cells[i]['geo']['num']), int(cells[i + 1]['geo']['num']),
+                resolved, corridor_dir,
+            )
+            if t is not None:
+                c += 1
+        return c
+
+    import math as _math
+    cell_px = int(FIG_INCHES * DPI)
+    def _dims(n_cells):
+        cols_eff = max(1, min(int(cols), n_cells))
+        rows_eff = _math.ceil(n_cells / cols_eff)
+        return cols_eff * cell_px, rows_eff * cell_px
+
+    am_w, am_h = _dims(len(am_cells))
+    pm_w, pm_h = _dims(len(pm_cells))
+
+    return {
+        "am": {
+            "png_base64": base64.b64encode(am_png).decode("ascii"),
+            "width": am_w,
+            "height": am_h,
+        },
+        "pm": {
+            "png_base64": base64.b64encode(pm_png).decode("ascii"),
+            "width": pm_w,
+            "height": pm_h,
+        },
+        "segment_counts": {
+            "AM": _count_segments(am_cells, am_resolved),
+            "PM": _count_segments(pm_cells, pm_resolved),
+        },
+    }
 
 
 @app.post("/export-excel", dependencies=[Depends(require_auth)])
