@@ -868,12 +868,19 @@
 
 /* ═══ S2 modeless editor redesign ═══════════════════════════════════════ */
 
-/* Top toolbar: Add pill + undo/redo (always visible — no hidden mode state) */
+/* S2 overlay z-index scale (Leaflet uses 200–700 panes, ~800 controls).
+   Three tiers, documented so it never becomes a forest of magic numbers:
+     1000  persistent chrome  — toolbar, search, ghost/zero-link hints
+     1100  attention          — armed-connect status banner
+     1200  transient          — add popover, toast                       */
+
+/* Top toolbar: Add pill + undo/redo. Pinned top-LEFT; the search bar is
+   stacked just below it (see the `.di-s2 .di-search` override) so the two
+   never compete at any viewport width. */
 .di-s2-tools {
   position: absolute;
   top: 12px;
-  left: 50%;
-  transform: translateX(-50%);
+  left: 12px;
   z-index: 1000;
   display: flex;
   align-items: center;
@@ -923,10 +930,16 @@
 .di-s2-tools__icon:hover:not(:disabled) { background: var(--bg-hover); color: var(--text-primary); }
 .di-s2-tools__icon:disabled { opacity: 0.35; cursor: not-allowed; }
 
-/* Loud armed-connect banner (persistent until target chosen / Esc) */
+/* In S2, stack the Photon search BELOW the toolbar (top-left) so neither is
+   ever obscured. Scoped to .di-s2 → the S7 flow map's search is untouched. */
+.di-s2 .di-search { top: 64px; left: 12px; }
+
+/* Loud armed-connect banner — bottom-center status bar (clear of the top-left
+   toolbar/search stack; shows only during a connect, so it never coincides
+   with the post-action toast). */
 .di-s2-armed {
   position: absolute;
-  top: 56px;
+  bottom: 72px;
   left: 50%;
   transform: translateX(-50%);
   z-index: 1100;
@@ -955,7 +968,7 @@
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  z-index: 900;
+  z-index: 1000;
   pointer-events: none;
   text-align: center;
   max-width: 360px;
@@ -1097,10 +1110,11 @@
 }
 .di-inspector__delete:hover { background: rgba(255, 107, 107, 0.12); }
 
-/* Segmented control (Inspector + add popover) */
-.di-seg { display: flex; gap: 4px; flex-wrap: wrap; }
+/* Segmented control (Inspector + add popover). 2-column grid so 4 longer
+   labels (e.g. "Two-way stop") get ~½ the width instead of ¼ — they no longer
+   spill out of a too-narrow button into the neighbor. Ellipsis is a safety net. */
+.di-seg { display: grid; grid-template-columns: repeat(2, 1fr); gap: 4px; }
 .di-seg__opt {
-  flex: 1;
   min-width: 0;
   height: 30px;
   padding: 0 8px;
@@ -1111,6 +1125,8 @@
   font: 500 11px var(--font-sans);
   cursor: pointer;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .di-seg__opt:hover { border-color: var(--border-strong); color: var(--text-primary); }
 .di-seg__opt--on { background: var(--accent); border-color: var(--accent); color: #FFFFFF; }
@@ -1162,7 +1178,7 @@
   bottom: 20px;
   left: 50%;
   transform: translateX(-50%);
-  z-index: 1300;
+  z-index: 1200;
   display: flex;
   align-items: center;
   gap: 12px;
