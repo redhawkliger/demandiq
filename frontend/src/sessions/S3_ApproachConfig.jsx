@@ -86,6 +86,7 @@ export default function S3_ApproachConfig() {
   const isFirst = activeIdx === 0
   const isLast = activeIdx === intersections.length - 1
   const allConfigured = intersections.every((it) => isIntersectionConfigured(it.id))
+  const unconfigured = intersections.filter((it) => !isIntersectionConfigured(it.id)).map((it) => it.num)
   const groups = groupedDirs(corridorDir)
 
   // The active intersection might still be missing approaches on the very first
@@ -210,20 +211,30 @@ export default function S3_ApproachConfig() {
           Intersection {activeIdx + 1} of {intersections.length}
         </span>
 
-        {isLast ? (
+        {/* Page-advance is ALWAYS available (gated on all intersections being
+            configured) — not hidden behind reaching the last one. "Next" is a
+            secondary stepper for moving between intersections. */}
+        <div className="di-s3__footer-adv">
+          {!allConfigured && (
+            <span className="di-s3__footer-hint">
+              Configure intersection{unconfigured.length === 1 ? '' : 's'} {unconfigured.join(', ')} to continue
+            </span>
+          )}
+          {!isLast && (
+            <button type="button" className="di-btn-secondary" onClick={goNext}>
+              Next <ChevronRight size={16} style={{ verticalAlign: '-3px' }} />
+            </button>
+          )}
           <button
             type="button"
             className="di-btn-primary"
             disabled={!allConfigured}
             onClick={goVolumes}
+            title={allConfigured ? 'Go to volume entry' : 'Configure all intersections first'}
           >
             Continue to volume entry →
           </button>
-        ) : (
-          <button type="button" className="di-btn-primary" onClick={goNext}>
-            Next <ChevronRight size={16} style={{ verticalAlign: '-3px' }} />
-          </button>
-        )}
+        </div>
       </footer>
 
       <MovementPickerModal

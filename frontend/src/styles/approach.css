@@ -43,6 +43,17 @@
   text-transform: uppercase;
   font-variant-numeric: tabular-nums;
 }
+.di-s3__footer-adv {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.di-s3__footer-hint {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  max-width: 280px;
+  text-align: right;
+}
 
 /* ── Empty / redirect state ──────────────────────────────────────────── */
 .di-s3-empty {
