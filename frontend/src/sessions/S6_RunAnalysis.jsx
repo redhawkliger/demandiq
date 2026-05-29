@@ -279,7 +279,7 @@ export default function S6_RunAnalysis() {
         <button
           type="button"
           className="di-btn-primary"
-          disabled={!hasResults || status !== 'done'}
+          disabled={!hasResults || isRunning}
           onClick={() => navigate('/review-drops')}
         >
           Continue to review drops →

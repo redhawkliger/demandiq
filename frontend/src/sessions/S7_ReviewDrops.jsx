@@ -304,6 +304,13 @@ export default function S7_ReviewDrops() {
     <div className="di-s7r">
       <header className="di-s7r__head">
         <div>
+          <button
+            type="button"
+            onClick={() => navigate('/analysis')}
+            style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', font: 'inherit', fontSize: 12, padding: 0, marginBottom: 6 }}
+          >
+            ← Back to analysis
+          </button>
           <h2 className="di-s7r__title">Review movements</h2>
           <p className="di-s7r__sub">
             Every turning movement at every intersection. Values shown as{' '}
