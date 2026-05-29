@@ -16,6 +16,11 @@ import {
   summarizeReconcile,
   getSnapshot,
   setIntersections,
+  pushHistory,
+  undo,
+  redo,
+  canUndo,
+  canRedo,
 } from './projectStore.js'
 
 let passed = 0, failed = 0
@@ -203,6 +208,29 @@ setIntersections([{ id: 'i1', num: 1, name: 'New & Main', control: 'Signalized',
 const after = getSnapshot()
 ok(after.intersections.length === 1 && after.intersections[0].id === 'i1',
   `Willow: add-intersection works after heal, got ${after.intersections.length}`)
+
+// ── Undo / redo (snapshot history, push-before-commit) ───────────────────
+// State now: 1 intersection (i1). Simulate two user commits, each snapshotting
+// the pre-action state first.
+pushHistory()
+setIntersections([...getSnapshot().intersections, { id: 'i2', num: 2, name: 'B', control: 'Signalized', legs: '4-leg', mainDir: 'EB/WB', crossDir: 'NB/SB' }])
+ok(getSnapshot().intersections.length === 2, 'history: second intersection added')
+ok(canUndo() && !canRedo(), 'history: canUndo true, canRedo false after a push')
+
+pushHistory()
+setIntersections([...getSnapshot().intersections, { id: 'i3', num: 3, name: 'C', control: 'Signalized', legs: '4-leg', mainDir: 'EB/WB', crossDir: 'NB/SB' }])
+ok(getSnapshot().intersections.length === 3, 'history: third intersection added')
+
+ok(undo() === true && getSnapshot().intersections.length === 2, 'undo: back to 2 (pre-third state)')
+ok(undo() === true && getSnapshot().intersections.length === 1, 'undo: back to 1 (pre-second state)')
+ok(canRedo(), 'history: canRedo true after undo')
+ok(redo() === true && getSnapshot().intersections.length === 2, 'redo: forward to 2')
+
+// A fresh push after undo invalidates the redo stack.
+ok(canRedo(), 'history: redo still available before new action')
+pushHistory()
+setIntersections([...getSnapshot().intersections, { id: 'i9', num: 3, name: 'Z', control: 'Signalized', legs: '4-leg', mainDir: 'EB/WB', crossDir: 'NB/SB' }])
+ok(!canRedo(), 'history: new action clears the redo stack')
 
 console.log(`\n${'='.repeat(46)}\n  ${passed} passed, ${failed} failed`)
 process.exit(failed === 0 ? 0 : 1)

@@ -1,4 +1,4 @@
-import { Pencil, Trash2, MapPin, GripVertical } from 'lucide-react'
+import { Trash2, MapPin, GripVertical } from 'lucide-react'
 import {
   DndContext,
   PointerSensor,
@@ -18,14 +18,16 @@ import { CSS } from '@dnd-kit/utilities'
 
 export default function IntersectionList({
   intersections,
-  onEdit,
+  selectedId,
+  onSelect,
   onRemove,
   onReorder,
   onContinue,
   canContinue,
+  inspector,
 }) {
   const sensors = useSensors(
-    // Require a small drag distance so clicks on Edit/Remove buttons still fire.
+    // Require a small drag distance so clicks on the row/remove button still fire.
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   )
@@ -51,7 +53,7 @@ export default function IntersectionList({
         {intersections.length === 0 ? (
           <div className="di-side__empty">
             <MapPin size={20} />
-            <span>Click the map to add your first intersection</span>
+            <span>Click <strong>＋ Add intersection</strong>, then click the map to drop a pin</span>
           </div>
         ) : (
           <DndContext
@@ -68,7 +70,8 @@ export default function IntersectionList({
                   key={it.id}
                   it={it}
                   idx={idx}
-                  onEdit={onEdit}
+                  selected={selectedId === it.id}
+                  onSelect={onSelect}
                   onRemove={onRemove}
                 />
               ))}
@@ -76,6 +79,8 @@ export default function IntersectionList({
           </DndContext>
         )}
       </div>
+
+      {inspector}
 
       <div className="di-side__footer">
         {!canContinue && (
@@ -94,7 +99,7 @@ export default function IntersectionList({
   )
 }
 
-function SortableIntersection({ it, idx, onEdit, onRemove }) {
+function SortableIntersection({ it, idx, selected, onSelect, onRemove }) {
   const {
     attributes,
     listeners,
@@ -113,7 +118,7 @@ function SortableIntersection({ it, idx, onEdit, onRemove }) {
     <div
       ref={setNodeRef}
       style={style}
-      className={`di-int${isDragging ? ' di-int--dragging' : ''}`}
+      className={`di-int${isDragging ? ' di-int--dragging' : ''}${selected ? ' di-int--selected' : ''}`}
     >
       <button
         type="button"
@@ -125,7 +130,12 @@ function SortableIntersection({ it, idx, onEdit, onRemove }) {
         <GripVertical size={14} />
       </button>
       <div className="di-int__num">{it.num}</div>
-      <div className="di-int__body">
+      <button
+        type="button"
+        className="di-int__body"
+        aria-pressed={selected}
+        onClick={() => onSelect(it.id)}
+      >
         <div className="di-int__name" title={it.name}>{it.name}</div>
         <div className="di-int__pills">
           <span className="di-int__pill">{it.control}</span>
@@ -133,9 +143,8 @@ function SortableIntersection({ it, idx, onEdit, onRemove }) {
           <span className="di-int__pill">{it.mainDir}</span>
           <span className="di-int__pill">{it.crossDir}</span>
         </div>
-      </div>
+      </button>
       <div className="di-int__actions">
-        <button type="button" aria-label="Edit"   onClick={() => onEdit(idx)}><Pencil size={14}/></button>
         <button type="button" aria-label="Remove" onClick={() => onRemove(idx)}><Trash2 size={14}/></button>
       </div>
     </div>

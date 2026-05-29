@@ -20,13 +20,23 @@ const FLOW_LABEL_HIDE_ZOOM = 11
 // Convention follows the "driver's right" rule: EB south, WB north,
 // NB east, SB west.
 
-const numberedIcon = (num, { armed = false, linkable = false } = {}) =>
-  L.divIcon({
-    className: `di-pin${armed ? ' di-pin--armed' : ''}${linkable ? ' di-pin--linkable' : ''}`,
-    html: `<div class="di-pin__num">${num}</div>`,
+const numberedIcon = (num, { armed = false, linkable = false, selected = false, actions = false } = {}) => {
+  const actionsHtml = actions
+    ? '<div class="di-pin__actions">' +
+        '<button class="di-pin__connect" data-act="connect" type="button">Connect</button>' +
+        '<button class="di-pin__del" data-act="delete" type="button" aria-label="Delete intersection">✕</button>' +
+      '</div>'
+    : ''
+  return L.divIcon({
+    className:
+      `di-pin${armed ? ' di-pin--armed' : ''}` +
+      `${linkable ? ' di-pin--linkable' : ''}` +
+      `${selected ? ' di-pin--selected' : ''}`,
+    html: `<div class="di-pin__num">${num}</div>${actionsHtml}`,
     iconSize: [32, 32],
     iconAnchor: [16, 16],
   })
+}
 
 // Link polyline colors — direction-coded. EB/WB blue (matches the accent
 // token already used elsewhere), NB/SB amber (matches the warning/needs-volumes
@@ -41,8 +51,24 @@ const pendingIcon = L.divIcon({
 })
 
 // ── Map click → orchestrator ──────────────────────────────────────────
+// Pan-guard: a click only counts if the pointer barely moved (<5px) and the
+// press was brief (<250ms). This keeps a drag-to-pan from being read as a
+// click (e.g. dropping an intersection in S2's Add mode). Leaflet already
+// suppresses most post-drag clicks; this makes the guarantee explicit.
 function ClickHandler({ onClick }) {
-  useMapEvents({ click: (e) => onClick(e.latlng) })
+  const downRef = useRef(null)
+  useMapEvents({
+    mousedown: (e) => { downRef.current = { pt: e.containerPoint, t: Date.now() } },
+    click: (e) => {
+      const d = downRef.current
+      downRef.current = null
+      if (d) {
+        const moved = Math.hypot(e.containerPoint.x - d.pt.x, e.containerPoint.y - d.pt.y)
+        if (moved >= 5 || Date.now() - d.t >= 250) return
+      }
+      onClick?.(e.latlng)
+    },
+  })
   return null
 }
 
@@ -51,7 +77,12 @@ function ClickHandler({ onClick }) {
 //   'intersections' → existing behavior (non-interactive pins, dashed corridor)
 //   'links'         → pins are clickable to arm/connect; dashed corridor hidden
 //                     to avoid visual confusion with explicit link polylines
-function MapLayers({ intersections, pendingPin, mode, viewMode, armedId, onIntersectionClick }) {
+function MapLayers({
+  intersections, pendingPin, mode, viewMode, armedId, onIntersectionClick,
+  // S2 editing (opt-in; S7 leaves these unset → unchanged behavior)
+  editablePins = false, selectedId = null, connectFromId = null,
+  onConnectStart, onDeleteIntersection,
+}) {
   const map = useMap()
   const markersRef = useRef([])
   const polylineRef = useRef(null)
@@ -72,17 +103,32 @@ function MapLayers({ intersections, pendingPin, mode, viewMode, armedId, onInter
     }
     intersections.forEach((it) => {
       const linkable = mode === 'links'
-      const armed = armedId === it.id
+      const interactive = linkable || editablePins
+      const armed = armedId === it.id || connectFromId === it.id
+      const selected = selectedId === it.id
+      const showActions = selected && editablePins
       const m = L.marker([it.lat, it.lng], {
-        icon: numberedIcon(it.num, { armed, linkable }),
-        interactive: linkable,                 // only clickable in link mode
+        icon: numberedIcon(it.num, { armed, linkable: interactive, selected, actions: showActions }),
+        interactive,
         keyboard: false,
       }).addTo(map)
-      if (linkable && onIntersectionClick) {
+      if (interactive && onIntersectionClick) {
         m.on('click', (e) => {
+          // Clicks on the glued action buttons are handled by their own DOM
+          // listeners below — don't also treat them as a "select" of the pin.
+          const t = e.originalEvent?.target
+          if (t && t.closest && t.closest('.di-pin__actions')) return
           L.DomEvent.stopPropagation(e)        // don't bubble to map (no new pin)
-          onIntersectionClick(it.id)
+          const pt = map.latLngToContainerPoint(e.latlng)
+          onIntersectionClick(it.id, { x: pt.x, y: pt.y })
         })
+      }
+      if (showActions) {
+        const el = m.getElement()
+        const cBtn = el?.querySelector('.di-pin__connect')
+        const dBtn = el?.querySelector('.di-pin__del')
+        if (cBtn) cBtn.addEventListener('click', (ev) => { ev.stopPropagation(); onConnectStart?.(it.id) })
+        if (dBtn) dBtn.addEventListener('click', (ev) => { ev.stopPropagation(); onDeleteIntersection?.(it.id) })
       }
       markersRef.current.push(m)
     })
@@ -99,7 +145,8 @@ function MapLayers({ intersections, pendingPin, mode, viewMode, armedId, onInter
         }
       ).addTo(map)
     }
-  }, [intersections, mode, viewMode, armedId, onIntersectionClick, map])
+  }, [intersections, mode, viewMode, armedId, onIntersectionClick, map,
+      editablePins, selectedId, connectFromId, onConnectStart, onDeleteIntersection])
 
   // Amber pending marker
   useEffect(() => {
@@ -155,7 +202,7 @@ function MapLayers({ intersections, pendingPin, mode, viewMode, armedId, onInter
 function LinkLayers({
   intersections, links, mode, viewMode,
   selectedLinkId, onSelectLink,
-  lastRun, overrides,
+  lastRun, overrides, editablePins = false,
 }) {
   const map = useMap()
   const linesRef = useRef([])
@@ -185,7 +232,7 @@ function LinkLayers({
         color = LINK_COLORS[link.direction] || '#0A84FF'
       }
       const selected = link.id === selectedLinkId
-      const interactive = mode === 'links' || isFlow
+      const interactive = mode === 'links' || isFlow || editablePins
       const polyline = L.polyline(
         [[from.lat, from.lng], [to.lat, to.lng]],
         {
@@ -205,7 +252,7 @@ function LinkLayers({
       }
       linesRef.current.push(polyline)
     }
-  }, [intersections, links, mode, viewMode, isFlow, selectedLinkId, onSelectLink, lastRun, overrides, map])
+  }, [intersections, links, mode, viewMode, isFlow, selectedLinkId, onSelectLink, lastRun, overrides, map, editablePins])
 
   // Close popup on map pan/zoom — popup position is computed at click time
   // and would drift otherwise
@@ -434,6 +481,12 @@ export default function MapView({
   selectedLinkId = null,
   onIntersectionClick,
   onSelectLink,
+  // S2 editing (opt-in; S7/flow leaves these unset)
+  editablePins = false,              // pins interactive → click selects
+  selectedId = null,                 // selected intersection id (halo + actions)
+  connectFromId = null,              // armed connect source id
+  onConnectStart,                    // (id) => void — "Connect" on selected pin
+  onDeleteIntersection,              // (id) => void — delete on selected pin
   // Stage 6 — flow-map props (optional)
   viewMode = 'edit',                 // 'edit' | 'pre' | 'post'
   showDirLabels = false,
@@ -468,6 +521,7 @@ export default function MapView({
         onSelectLink={onSelectLink}
         lastRun={lastRun}
         overrides={overrides}
+        editablePins={editablePins}
       />
       <FlowLabels
         intersections={intersections}
@@ -484,6 +538,11 @@ export default function MapView({
         viewMode={viewMode}
         armedId={armedId}
         onIntersectionClick={onIntersectionClick}
+        editablePins={editablePins}
+        selectedId={selectedId}
+        connectFromId={connectFromId}
+        onConnectStart={onConnectStart}
+        onDeleteIntersection={onDeleteIntersection}
       />
       <SearchBar />
     </MapContainer>

@@ -238,6 +238,53 @@ function _persist() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(_snapshot))
 }
 
+// ── Undo / redo history ───────────────────────────────────────────────────────
+// Full-snapshot history (not field-level diffs): a single intersection delete
+// already cascades to links / lastRun / balancing modes / overrides via
+// reconcileDependents, so only restoring the whole prior snapshot is correct.
+//
+// Contract: callers invoke pushHistory() BEFORE committing a mutation, so the
+// first undo lands on the exact pre-action state. Coalescing (e.g. one snapshot
+// per field commit, not per keystroke) is the caller's responsibility — keep
+// pushHistory tied to user-level commits. In-memory + session-scoped: a reload
+// or project reset starts with empty history.
+const HISTORY_DEPTH = 50
+let _past = []      // snapshots older than current (undo targets)
+let _future = []    // snapshots undone (redo targets)
+
+export function pushHistory() {
+  if (!_initialized) _initSnapshot()
+  _past.push(JSON.stringify(_snapshot))
+  if (_past.length > HISTORY_DEPTH) _past.shift()
+  _future = []   // a fresh action invalidates the redo stack
+}
+
+export function canUndo() { return _past.length > 0 }
+export function canRedo() { return _future.length > 0 }
+
+export function undo() {
+  if (_past.length === 0) return false
+  _future.push(JSON.stringify(_snapshot))
+  _snapshot = JSON.parse(_past.pop())
+  _persist()
+  _emit()
+  return true
+}
+
+export function redo() {
+  if (_future.length === 0) return false
+  _past.push(JSON.stringify(_snapshot))
+  _snapshot = JSON.parse(_future.pop())
+  _persist()
+  _emit()
+  return true
+}
+
+function _clearHistory() {
+  _past = []
+  _future = []
+}
+
 // ── Reactive surface (useSyncExternalStore) ───────────────────────────────────
 export function subscribe(listener) {
   _listeners.add(listener)
@@ -701,6 +748,7 @@ export function clearProject() {
   _snapshot = {}
   _initialized = true
   localStorage.removeItem(STORAGE_KEY)
+  _clearHistory()
   _emit()
 }
 
