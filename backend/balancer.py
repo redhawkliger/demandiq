@@ -311,8 +311,16 @@ LEG_INDEX  = {'S': 0, 'N': 1, 'W': 2, 'E': 3}    # leg name → row/col index
 LEG_IN_DIR  = {0: 'NB', 1: 'SB', 2: 'EB', 3: 'WB'}   # cars entering via leg
 LEG_OUT_DIR = {0: 'SB', 1: 'NB', 2: 'WB', 3: 'EB'}   # cars exiting via leg
 
+# Coordinate-equality epsilon for detecting overlapping intersection lat/lng.
+# 1e-6 degrees ≈ 11 cm — far below survey precision, so anything within this
+# distance is effectively "same point" and can't disambiguate leg orientation.
+# Used by resolve_link_volumes to emit GEOMETRY-FALLBACK qc_flags when the
+# lat/lng-based directional resolution falls through to int-number ordering.
+COORD_DEGENERACY_EPS = 1e-6
 
-def resolve_link_volumes(volumes, links, method='larger', coords=None):
+
+def resolve_link_volumes(volumes, links, method='larger', coords=None,
+                          geometry_fallbacks=None):
     """STEP A — collapse two adjacent intersection counts on the same link
     into ONE resolved volume per directed edge.
 
@@ -323,6 +331,11 @@ def resolve_link_volumes(volumes, links, method='larger', coords=None):
         coords:  { int_num: {'lat': float, 'lng': float} } — optional but
                  strongly recommended. Without coords, num-order is used as a
                  fallback geographic ordering (assumes lower num is west/south).
+        geometry_fallbacks: optional list to receive (lo_num, hi_num) tuples for
+                 every link whose orientation couldn't be disambiguated from
+                 coords (missing coords OR overlapping within COORD_DEGENERACY_EPS).
+                 Caller turns these into GEOMETRY-FALLBACK qc_flags. Deduped
+                 internally by sorted int pair so AM + PM share the same accumulator.
 
     Returns:
         { (upstream_num, downstream_num, dir_code): resolved_volume }
@@ -334,6 +347,14 @@ def resolve_link_volumes(volumes, links, method='larger', coords=None):
     """
     coords = coords or {}
     out = {}
+
+    def _note_fallback(a, b):
+        if geometry_fallbacks is None:
+            return
+        pair = (min(a, b), max(a, b))
+        if pair not in geometry_fallbacks:
+            geometry_fallbacks.append(pair)
+
     for L in links:
         a, b = int(L['fromNum']), int(L['toNum'])
         axis = L.get('direction')
@@ -341,10 +362,15 @@ def resolve_link_volumes(volumes, links, method='larger', coords=None):
             # Determine which is west by longitude (or fallback: smaller num is west)
             a_lng = coords.get(a, {}).get('lng')
             b_lng = coords.get(b, {}).get('lng')
-            if a_lng is not None and b_lng is not None:
+            if (a_lng is not None and b_lng is not None
+                    and abs(a_lng - b_lng) > COORD_DEGENERACY_EPS):
                 west, east = (a, b) if a_lng < b_lng else (b, a)
             else:
+                # Either coord missing or coords are coincident within epsilon —
+                # int-number ordering is the only signal we have. Record so the
+                # engineer sees a named warning instead of mystery LINK-DELTA.
                 west, east = (a, b) if a < b else (b, a)
+                _note_fallback(a, b)
             for dir_code, up, dn in (('EB', west, east), ('WB', east, west)):
                 up_vols = volumes.get(up, {})
                 dn_vols = volumes.get(dn, {})
@@ -355,10 +381,12 @@ def resolve_link_volumes(volumes, links, method='larger', coords=None):
         elif axis == 'NB/SB':
             a_lat = coords.get(a, {}).get('lat')
             b_lat = coords.get(b, {}).get('lat')
-            if a_lat is not None and b_lat is not None:
+            if (a_lat is not None and b_lat is not None
+                    and abs(a_lat - b_lat) > COORD_DEGENERACY_EPS):
                 south, north = (a, b) if a_lat < b_lat else (b, a)
             else:
                 south, north = (a, b) if a < b else (b, a)
+                _note_fallback(a, b)
             for dir_code, up, dn in (('NB', south, north), ('SB', north, south)):
                 up_vols = volumes.get(up, {})
                 dn_vols = volumes.get(dn, {})
@@ -1031,8 +1059,14 @@ def balance_nchrp(
     """
     import copy
 
-    # Step A: resolve link disagreements
-    resolved = resolve_link_volumes(raw_volumes, links, method=method, coords=coords)
+    # Step A: resolve link disagreements. Collect geometry-fallback events
+    # (coords missing or coincident within COORD_DEGENERACY_EPS) so we can
+    # emit GEOMETRY-FALLBACK qc_flags downstream — engineers see a named
+    # warning rather than mystery NCHRP-LINK-DELTA residuals from a leg
+    # whose orientation was guessed from int-number order.
+    geometry_fallbacks = []
+    resolved = resolve_link_volumes(raw_volumes, links, method=method, coords=coords,
+                                     geometry_fallbacks=geometry_fallbacks)
     links_by_int = _build_links_by_int(links, coords=coords)
 
     # ── Step B Level 1: balance_leg_totals (network leg-total reconciliation)
@@ -1047,6 +1081,21 @@ def balance_nchrp(
     converged_map = {}
     final_residual_map = {}
     qc_flags = list(level1_flags)             # carry NCHRP-LINK-INFEASIBLE through
+
+    # GEOMETRY-FALLBACK: one flag per link pair whose leg orientation couldn't
+    # be resolved from lat/lng. period=None signals the flag is corridor-level
+    # (not period-specific); app.py preserves that and dedupes across AM + PM.
+    for (lo, hi) in geometry_fallbacks:
+        qc_flags.append({
+            'check': 'GEOMETRY-FALLBACK',
+            'period': None,
+            'fromNum': lo,
+            'toNum': hi,
+            'message': (
+                f"Directional fallback used at Int {lo}↔{hi} "
+                f"— verify leg orientation."
+            ),
+        })
 
     # Pass-through intersections (no present legs) — typically intersections
     # with no volumes and no links. Skip Level 2.
