@@ -39,14 +39,32 @@ function stamp(d = new Date()) {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}`
 }
 
+// Strip legacy / dead fields from a lastRun object before dumping. `chains`
+// has been dead since Stage 3 (algorithm is per-intersection, not chain-based)
+// but may still exist on persisted projects from older runs.
+function stripDeadRunFields(run) {
+  if (!run || typeof run !== 'object') return run
+  // Avoid mutating the live snapshot.
+  // eslint-disable-next-line no-unused-vars
+  const { chains, ...rest } = run
+  return rest
+}
+
 // Build the diagnostics object (pure — exported for testing/inspection).
 export function buildDiagnostics() {
   const snap = getSnapshot() || {}
 
-  let project = null
+  let project
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
     project = raw ? stripAuthKeys(JSON.parse(raw)) : null
+    // Also strip dead fields from the embedded lastRun on the persisted snapshot.
+    if (project?.analysis?.lastRun) {
+      project = {
+        ...project,
+        analysis: { ...project.analysis, lastRun: stripDeadRunFields(project.analysis.lastRun) },
+      }
+    }
   } catch {
     project = null
   }
@@ -58,7 +76,7 @@ export function buildDiagnostics() {
     project,
     // lastRun + overrides also pass through the recursive strip so the
     // guarantee holds uniformly across every field of the dump.
-    lastRun: stripAuthKeys(snap.analysis?.lastRun ?? null),
+    lastRun: stripAuthKeys(stripDeadRunFields(snap.analysis?.lastRun ?? null)),
     overrides: stripAuthKeys(snap.balancing?.overrides ?? null),
   }
 }
