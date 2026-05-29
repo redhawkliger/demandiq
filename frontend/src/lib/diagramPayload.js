@@ -1,5 +1,5 @@
 // Shared helpers that turn a project intersection into the payload shape the
-// backend diagram renderer expects (/line-diagram and /export-diagram-grid).
+// backend diagram renderer expects (/intersection-diagram and /export-diagram-grid).
 // Extracted from S7_Results so the S8 batch grid can build cells too.
 
 export function stripVols(period, intersection) {
@@ -48,7 +48,7 @@ export function intersectionGeo(intersection) {
   }
 }
 
-// /line-diagram payload for one intersection + period + view.
+// /intersection-diagram payload for one intersection + period + view.
 export function buildPayload(intersection, period, viewMode, overrides) {
   return {
     intersection: intersectionGeo(intersection),

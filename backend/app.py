@@ -472,8 +472,8 @@ ALL_MOVEMENTS = [
 ]
 
 
-@app.post("/line-diagram", dependencies=[Depends(require_auth)])
-async def line_diagram_endpoint(payload: dict):
+@app.post("/intersection-diagram", dependencies=[Depends(require_auth)])
+async def intersection_diagram_endpoint(payload: dict):
     """Render one intersection as a PNG line diagram.
 
     Wraps backend/line_diagram.render_single_diagram. Returns the PNG as

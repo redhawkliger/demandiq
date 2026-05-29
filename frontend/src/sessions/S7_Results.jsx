@@ -43,7 +43,7 @@ const diagramKey = (it, p, v, ts, ovKey) =>
   `${it.id}-${p}-${v}-${ts}-${ovKey}-${encodeURIComponent(it.diagramNote || '')}`
 
 async function fetchDiagram(payload) {
-  const res = await fetch('/api/line-diagram', {
+  const res = await fetch('/api/intersection-diagram', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
