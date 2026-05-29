@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { RotateCcw } from 'lucide-react'
+import { RotateCcw, Download, AlertTriangle } from 'lucide-react'
+import 'leaflet/dist/leaflet.css'
 
 import {
   subscribe,
@@ -10,9 +11,12 @@ import {
   clearAllOverrides,
   clampOverrideToRaw,
 } from '../store/projectStore'
+import MapView from '../components/MapView'
+import { buildLinkFlows, lastRunStaleness } from '../lib/flowMap'
+import { exportFlowMapPNG } from '../lib/flowMapExport'
 
 import '../styles/forms.css'
-import '../styles/map.css'         // .di-banner, .di-btn-primary, .di-btn-secondary
+import '../styles/map.css'         // .di-banner, .di-btn-*, .di-s2-flow-*, .di-link-popup, .di-flow-popup
 import '../styles/balancing.css'   // .di-segmented (still used for intersection chips, etc.)
 import '../styles/analysis.css'    // .di-s6-lc* (LinkConservationTable styles)
 import '../styles/review.css'
@@ -114,6 +118,23 @@ export default function S7_ReviewDrops() {
   const intersections = snap.intersections || []
   const lastRun = snap.analysis?.lastRun ?? null
   const overrides = snap.balancing?.overrides ?? { AM: {}, PM: {} }
+  const links = snap.links || []
+  const project = snap.project || {}
+
+  // ── Flow map (relocated from S2) ───────────────────────────────────
+  // The user is on the review screen because analysis ran, so default to the
+  // post-balance view. Reads intersections + links + lastRun + overrides; since
+  // S7 subscribes to the store, editing an override re-derives the map live.
+  const [viewMode, setViewMode] = useState('post')   // 'pre' | 'post'
+  const [showDirLabels, setShowDirLabels] = useState(false)
+  const [exporting, setExporting] = useState(false)
+  const [flowPopup, setFlowPopup] = useState(null)    // { id, x, y }
+  const tileLayerRef = useRef(null)
+  const mapWrapperRef = useRef(null)
+  const staleness = useMemo(
+    () => lastRunStaleness(lastRun, links, intersections),
+    [lastRun, links, intersections],
+  )
 
   const needsRun = !lastRun || !lastRun.method
   useEffect(() => {
@@ -230,6 +251,40 @@ export default function S7_ReviewDrops() {
     if (ok) clearAllOverrides()
   }
 
+  const switchViewMode = (next) => {
+    if (next === viewMode) return
+    setFlowPopup(null)
+    setViewMode(next)
+  }
+
+  const handleSelectFlowLink = (linkId, pos) => {
+    if (!linkId || !pos) { setFlowPopup(null); return }
+    setFlowPopup({ id: linkId, x: pos.x, y: pos.y })
+  }
+
+  const handleExportPNG = async () => {
+    if (!tileLayerRef.current || !mapWrapperRef.current) return
+    setExporting(true)
+    try {
+      const container = mapWrapperRef.current.querySelector('.leaflet-container')
+      await exportFlowMapPNG({
+        tileLayer: tileLayerRef.current,
+        container,
+        meta: {
+          projectName: project.name || 'project',
+          viewType: viewMode === 'post' ? 'Post' : 'Pre',
+          method: lastRun?.method,
+          date: lastRun?.timestamp,
+        },
+      })
+    } catch (err) {
+      console.error('PNG export failed:', err)
+      alert(`PNG export failed: ${err.message}`)
+    } finally {
+      setExporting(false)
+    }
+  }
+
   if (needsRun) {
     return (
       <div className="di-s7r di-s7r--center">
@@ -258,6 +313,81 @@ export default function S7_ReviewDrops() {
           </p>
         </div>
       </header>
+
+      <div className="di-s7r__map" ref={mapWrapperRef}>
+        <div className="di-s2-flow-toolbar">
+          <div className="di-s2-flow-toolbar__row">
+            <div className="di-s2-flow-toolbar__seg" role="tablist" aria-label="Flow map view">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={viewMode === 'pre'}
+                className={`di-s2-flow-toolbar__opt${viewMode === 'pre' ? ' di-s2-flow-toolbar__opt--on' : ''}`}
+                onClick={() => switchViewMode('pre')}
+              >Pre-balance</button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={viewMode === 'post'}
+                className={`di-s2-flow-toolbar__opt${viewMode === 'post' ? ' di-s2-flow-toolbar__opt--on' : ''}`}
+                onClick={() => switchViewMode('post')}
+              >Post-balance</button>
+            </div>
+          </div>
+          <div className="di-s2-flow-toolbar__row">
+            <label className="di-s2-flow-toolbar__check">
+              <input
+                type="checkbox"
+                checked={showDirLabels}
+                onChange={(e) => setShowDirLabels(e.target.checked)}
+              />
+              <span>Show direction labels</span>
+            </label>
+            <button
+              type="button"
+              className="di-s2-flow-toolbar__export"
+              onClick={handleExportPNG}
+              disabled={exporting || intersections.length === 0}
+              title="Export this view as PNG"
+            >
+              <Download size={14} /> {exporting ? 'Exporting…' : 'Export PNG'}
+            </button>
+          </div>
+        </div>
+
+        {staleness.stale && viewMode === 'post' && (
+          <div className="di-s2-flow-stale" role="status">
+            <AlertTriangle size={14} />
+            Post-balance data may be stale — {staleness.reason}. Re-run analysis to refresh.
+          </div>
+        )}
+
+        <MapView
+          intersections={intersections}
+          onMapClick={() => { if (flowPopup) setFlowPopup(null) }}
+          mode="intersections"
+          links={links}
+          selectedLinkId={flowPopup?.id ?? null}
+          onSelectLink={handleSelectFlowLink}
+          viewMode={viewMode}
+          showDirLabels={showDirLabels}
+          lastRun={lastRun}
+          overrides={overrides}
+          onTileLayerReady={(tl) => { tileLayerRef.current = tl }}
+        />
+
+        {flowPopup && (
+          <LinkFlowPopup
+            link={links.find((l) => l.id === flowPopup.id)}
+            intersections={intersections}
+            viewMode={viewMode}
+            lastRun={lastRun}
+            overrides={overrides}
+            pos={{ x: flowPopup.x, y: flowPopup.y }}
+            onClose={() => setFlowPopup(null)}
+          />
+        )}
+      </div>
 
       <div className="di-s7r__toolbar">
         <div className="di-s7r__tools-left">
@@ -378,14 +508,6 @@ export default function S7_ReviewDrops() {
       )}
 
       <footer className="di-s7r__footer">
-        <button
-          type="button"
-          className="di-btn-secondary"
-          onClick={() => navigate('/map?view=post')}
-          title="Open the corridor map with post-balance volumes for visual review"
-        >
-          View flow map
-        </button>
         <button
           type="button"
           className="di-btn-primary"
@@ -556,6 +678,117 @@ function LinkConservationPanel({ period, rows }) {
           })}
         </tbody>
       </table>
+    </div>
+  )
+}
+
+// ── Flow-mode popup (read-only) ───────────────────────────────────────
+// Shows BOTH directed entries for the clicked physical link, each with
+// raw upstream/downstream, resolved link vol, post-balance value, and
+// residual — for AM and PM. No editing controls. (Relocated from S2.)
+function LinkFlowPopup({ link, intersections, viewMode, lastRun, overrides, pos, onClose }) {
+  const ref = useRef(null)
+
+  useEffect(() => {
+    const onDown = (e) => {
+      if (ref.current && !ref.current.contains(e.target)) onClose()
+    }
+    document.addEventListener('mousedown', onDown)
+    return () => document.removeEventListener('mousedown', onDown)
+  }, [onClose])
+
+  // Always derive flows in POST mode internally so the popup can render
+  // resolved + post-balance + residual even when looking at the Pre-balance
+  // map. PRE values are derived independently for the "Raw" rows.
+  const flowsPost = useMemo(() => {
+    if (!link) return []
+    return buildLinkFlows([link], intersections, 'post', { lastRun, overrides })
+  }, [link, intersections, lastRun, overrides])
+  const flowsPre = useMemo(() => {
+    if (!link) return []
+    return buildLinkFlows([link], intersections, 'pre', { lastRun, overrides })
+  }, [link, intersections, lastRun, overrides])
+
+  if (!link) return null
+  const post = flowsPost[0]
+  const pre  = flowsPre[0]
+  if (!post || !pre) return null
+
+  return (
+    <div
+      ref={ref}
+      className="di-link-popup di-flow-popup"
+      style={{ left: pos.x, top: pos.y }}
+      onMouseDown={(e) => e.stopPropagation()}
+    >
+      <div className="di-link-popup__head">
+        Link <span className="di-link-popup__num">{post.from.num}</span>
+        {' ↔ '}
+        <span className="di-link-popup__num">{post.to.num}</span>
+        <span className="di-flow-popup__mode">{link.mode}</span>
+      </div>
+      {post.directeds.map((pd, idx) => {
+        const preMatch = pre.directeds.find(
+          (p) => p.directed.direction === pd.directed.direction
+        )
+        return (
+          <FlowDirectionSection
+            key={idx}
+            directed={pd.directed}
+            preFlow={preMatch?.flows}
+            postFlow={pd.flows}
+            showPostFields={viewMode === 'post' && lastRun != null}
+          />
+        )
+      })}
+    </div>
+  )
+}
+
+function FlowDirectionSection({ directed, preFlow, postFlow, showPostFields }) {
+  if (!preFlow || !postFlow) return null
+  const fmt = (n) =>
+    (n == null || !Number.isFinite(n)) ? '—' : Math.round(n).toLocaleString()
+  const pair = (am, pm) => `${fmt(am)} (${fmt(pm)})`
+  const residualSign = (n) =>
+    n == null ? '' : (n > 0 ? '+' : '')
+  return (
+    <div className="di-flow-popup__section">
+      <div className="di-flow-popup__sec-head">
+        <span className="di-flow-popup__sec-dir">{directed.direction}</span>
+        {' '}
+        <span className="di-flow-popup__sec-route">
+          {directed.from.num} → {directed.to.num}
+        </span>
+      </div>
+      <div className="di-flow-popup__row">
+        <span>Raw upstream out</span>
+        <span className="di-flow-popup__val">{pair(preFlow.AM.upOut, preFlow.PM.upOut)}</span>
+      </div>
+      <div className="di-flow-popup__row">
+        <span>Raw downstream in</span>
+        <span className="di-flow-popup__val">{pair(preFlow.AM.downIn, preFlow.PM.downIn)}</span>
+      </div>
+      {showPostFields && (
+        <>
+          <div className="di-flow-popup__row">
+            <span>Resolved link vol</span>
+            <span className="di-flow-popup__val">{pair(postFlow.AM.resolved, postFlow.PM.resolved)}</span>
+          </div>
+          <div className="di-flow-popup__row">
+            <span>Post-balance value</span>
+            <span className="di-flow-popup__val">{pair(postFlow.AM.postValue, postFlow.PM.postValue)}</span>
+          </div>
+          <div className="di-flow-popup__row">
+            <span>Residual</span>
+            <span className="di-flow-popup__val">
+              {residualSign(postFlow.AM.residual)}{fmt(postFlow.AM.residual)}
+              {' / '}
+              {residualSign(postFlow.PM.residual)}{fmt(postFlow.PM.residual)}
+            </span>
+          </div>
+        </>
+      )}
     </div>
   )
 }
