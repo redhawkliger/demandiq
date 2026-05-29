@@ -264,22 +264,24 @@ td.di-vol-dir {
 .di-vol-th--sub { top: 30px; color: var(--text-tertiary); width: 50px; min-width: 50px; }
 .di-vol-th--scalar { top: 0; width: 64px; min-width: 64px; }
 
-/* Sticky-left header cells (top-left corners) */
+/* Sticky-left header cells (top-left corners).
+   PRD-04: meta 220→180px, period 36→30px so the wide grid (12 movement
+   columns + PHF + HV%) fits a 1024px viewport without horizontal clip. */
 .di-vol-th--meta {
   top: 0;
   left: 0;
   z-index: 12;
-  width: 220px;
-  min-width: 220px;
+  width: 180px;
+  min-width: 180px;
   text-align: left;
   padding-left: 12px;
 }
 .di-vol-th--period {
   top: 0;
-  left: 220px;
+  left: 180px;
   z-index: 11;
-  width: 36px;
-  min-width: 36px;
+  width: 30px;
+  min-width: 30px;
 }
 
 /* Body sticky-left cells */
@@ -290,8 +292,8 @@ td.di-vol-dir {
   background: var(--bg-elevated);
   text-align: left;
   padding: 8px 12px;
-  width: 220px;
-  min-width: 220px;
+  width: 180px;
+  min-width: 180px;
   vertical-align: top;
 }
 .di-vol-meta__num {
@@ -332,15 +334,15 @@ td.di-vol-dir {
 
 .di-vol-td--period {
   position: sticky;
-  left: 220px;
+  left: 180px;
   z-index: 4;
   background: var(--bg-elevated);
   font-size: 11px;
   color: var(--text-secondary);
   font-weight: 600;
   letter-spacing: 0.04em;
-  width: 36px;
-  min-width: 36px;
+  width: 30px;
+  min-width: 30px;
 }
 
 /* Cells */
