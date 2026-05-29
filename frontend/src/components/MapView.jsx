@@ -23,7 +23,7 @@ const FLOW_LABEL_HIDE_ZOOM = 11
 const numberedIcon = (num, { armed = false, linkable = false, selected = false, actions = false } = {}) => {
   const actionsHtml = actions
     ? '<div class="di-pin__actions">' +
-        '<button class="di-pin__connect" data-act="connect" type="button">Connect</button>' +
+        '<button class="di-pin__connect" data-act="connect" type="button">🔗 Link</button>' +
         '<button class="di-pin__del" data-act="delete" type="button" aria-label="Delete intersection">✕</button>' +
       '</div>'
     : ''
@@ -37,11 +37,6 @@ const numberedIcon = (num, { armed = false, linkable = false, selected = false, 
     iconAnchor: [16, 16],
   })
 }
-
-// Link polyline colors — direction-coded. EB/WB blue (matches the accent
-// token already used elsewhere), NB/SB amber (matches the warning/needs-volumes
-// token so the two existing UI colors do double duty).
-const LINK_COLORS = { 'EB/WB': '#0A84FF', 'NB/SB': '#FFB627' }
 
 const pendingIcon = L.divIcon({
   className: 'di-pin',
@@ -132,8 +127,11 @@ function MapLayers({
       }
       markersRef.current.push(m)
     })
+    // Dashed "corridor order" aid: only in legacy/flow-less non-editable views.
+    // S2 edit mode (editablePins) renders NO line except real connected links,
+    // so the dashed corridor is suppressed there.
     const isFlow = viewMode === 'pre' || viewMode === 'post'
-    if (mode !== 'links' && !isFlow && intersections.length >= 2) {
+    if (mode !== 'links' && !isFlow && !editablePins && intersections.length >= 2) {
       polylineRef.current = L.polyline(
         intersections.map((it) => [it.lat, it.lng]),
         {
@@ -200,7 +198,7 @@ function MapLayers({
 // the flow popup). The same onSelectLink callback fires in both cases —
 // the parent decides which popup to render.
 function LinkLayers({
-  intersections, links, mode, viewMode,
+  intersections, links, viewMode,
   selectedLinkId, onSelectLink,
   lastRun, overrides, editablePins = false,
 }) {
@@ -223,36 +221,47 @@ function LinkLayers({
     for (const link of links) {
       const from = byId.get(link.fromId)
       const to = byId.get(link.toId)
-      if (!from || !to) continue  // orphaned link (e.g. intersection deleted) — skip
-
-      let color
-      if (isFlow) {
-        color = flowsByLinkId.get(link.id)?.polyColor || '#6B7280'
-      } else {
-        color = LINK_COLORS[link.direction] || '#0A84FF'
-      }
+      if (!from || !to) continue  // orphaned link — render nothing
+      const latlngs = [[from.lat, from.lng], [to.lat, to.lng]]
       const selected = link.id === selectedLinkId
-      const interactive = mode === 'links' || isFlow || editablePins
-      const polyline = L.polyline(
-        [[from.lat, from.lng], [to.lat, to.lng]],
-        {
-          color,
-          weight: selected ? 5 : 3.5,
-          opacity: selected ? 1 : 0.9,
-          interactive,
-          pane: 'overlayPane',     // below markerPane → pins stay clickable
-        }
-      ).addTo(map)
-      if (interactive && onSelectLink) {
-        polyline.on('click', (e) => {
-          L.DomEvent.stopPropagation(e)
-          const pt = map.latLngToContainerPoint(e.latlng)
-          onSelectLink(link.id, { x: pt.x, y: pt.y })
-        })
+      const onClick = (e) => {
+        L.DomEvent.stopPropagation(e)
+        const pt = map.latLngToContainerPoint(e.latlng)
+        onSelectLink?.(link.id, { x: pt.x, y: pt.y })
       }
+
+      if (isFlow) {
+        // S7 flow map — imbalance-coded (unchanged; serves a different purpose)
+        const color = flowsByLinkId.get(link.id)?.polyColor || '#6B7280'
+        const polyline = L.polyline(latlngs, {
+          color, weight: selected ? 5 : 3.5, opacity: selected ? 1 : 0.9,
+          interactive: true, pane: 'overlayPane',
+        }).addTo(map)
+        if (onSelectLink) polyline.on('click', onClick)
+        linesRef.current.push(polyline)
+        continue
+      }
+
+      // S2 edit mode — one solid blue line per connected link. No direction
+      // color, no dashes, no arrows. Selected adds a yellow accent halo
+      // underneath; hover thickens the line by 1px.
+      if (selected) {
+        const halo = L.polyline(latlngs, {
+          color: '#FFD60A', weight: 8, opacity: 0.9,
+          interactive: false, pane: 'overlayPane',
+        }).addTo(map)
+        linesRef.current.push(halo)
+      }
+      const polyline = L.polyline(latlngs, {
+        color: '#0A84FF', weight: 4, opacity: 1,
+        interactive: true, pane: 'overlayPane',
+      }).addTo(map)
+      polyline.on('mouseover', () => polyline.setStyle({ weight: 5 }))
+      polyline.on('mouseout', () => polyline.setStyle({ weight: 4 }))
+      if (onSelectLink) polyline.on('click', onClick)
       linesRef.current.push(polyline)
     }
-  }, [intersections, links, mode, viewMode, isFlow, selectedLinkId, onSelectLink, lastRun, overrides, map, editablePins])
+  }, [intersections, links, viewMode, isFlow, selectedLinkId, onSelectLink, lastRun, overrides, map, editablePins])
 
   // Close popup on map pan/zoom — popup position is computed at click time
   // and would drift otherwise

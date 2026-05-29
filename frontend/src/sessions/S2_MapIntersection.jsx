@@ -15,7 +15,6 @@ import {
   setCorridorDir,
   addLink,
   removeLink,
-  updateLink,
   clearProject,
   pushHistory,
   undo,
@@ -125,19 +124,24 @@ export default function S2_MapIntersection() {
     showToast(linked > 0 ? `Removed intersection and ${linked} link${linked === 1 ? '' : 's'}` : 'Removed intersection')
   }
 
-  const createLink = (fromId, toId) => {
+  // Connect toggles: if the pair is already linked, clicking the target unlinks
+  // it; otherwise it creates the link (direction inferred from geometry).
+  const toggleLink = (fromId, toId) => {
     const a = intersections.find((it) => it.id === fromId)
     const b = intersections.find((it) => it.id === toId)
     if (!a || !b) return
+    const existing = links.find(
+      (l) => (l.fromId === fromId && l.toId === toId) || (l.fromId === toId && l.toId === fromId)
+    )
     pushHistory()
-    addLink({ fromId, toId, direction: suggestDirection(a, b), mode: 'Full' })
-    showToast(`Linked ${a.num} ↔ ${b.num}`)
-  }
-
-  const updateSelectedLink = (partial) => {
-    if (!selLink) return
-    pushHistory()
-    updateLink(selLink.id, partial)
+    if (existing) {
+      removeLink(existing.id)
+      if (selection?.id === existing.id) setSelection(null)
+      showToast(`Unlinked Int ${a.num} ↔ Int ${b.num}`)
+    } else {
+      addLink({ fromId, toId, direction: suggestDirection(a, b), mode: 'Full' })
+      showToast(`Linked Int ${a.num} ↔ Int ${b.num}`)
+    }
   }
 
   const deleteLinkById = (id) => {
@@ -209,7 +213,7 @@ export default function S2_MapIntersection() {
 
   const handlePinClick = (id) => {
     if (connectFrom) {
-      if (id !== connectFrom) createLink(connectFrom, id)
+      if (id !== connectFrom) toggleLink(connectFrom, id)
       setConnectFrom(null)
       return
     }
@@ -316,8 +320,7 @@ export default function S2_MapIntersection() {
         {/* Loud armed-connect banner (persistent until target picked / Esc) */}
         {connectFrom && (
           <div className="di-s2-armed" role="status">
-            Click the target intersection to link from{' '}
-            <strong>#{intersections.find((it) => it.id === connectFrom)?.num}</strong>
+            Click another intersection to link or unlink
             {' · '}<kbd>Esc</kbd> to cancel
           </div>
         )}
@@ -331,7 +334,7 @@ export default function S2_MapIntersection() {
         )}
         {showZeroLinkHint && (
           <div className="di-s2-ghost di-s2-ghost--corner" aria-hidden="true">
-            Select an intersection and press <strong>Connect</strong> to link it to another.
+            Select an intersection and press <strong>🔗 Link</strong> to connect it to another.
           </div>
         )}
 
@@ -393,7 +396,6 @@ export default function S2_MapIntersection() {
             onUpdateIntersection={updateIntersection}
             onDeleteIntersection={deleteIntersectionById}
             onStartConnect={startConnect}
-            onUpdateLink={updateSelectedLink}
             onDeleteLink={deleteLinkById}
             onResetProject={resetProject}
           />
@@ -471,7 +473,7 @@ function AddPopover({ draft, onChange, onCommit, onCancel }) {
 function Inspector({
   intersection, link, intersections, connectFrom,
   onUpdateIntersection, onDeleteIntersection, onStartConnect,
-  onUpdateLink, onDeleteLink, onResetProject,
+  onDeleteLink, onResetProject,
 }) {
   if (!intersection && !link) {
     return (
@@ -487,23 +489,7 @@ function Inspector({
     const to = intersections.find((i) => i.id === link.toId)
     return (
       <div className="di-inspector">
-        <div className="di-inspector__head">Link {from?.num ?? '?'} ↔ {to?.num ?? '?'}</div>
-        <div className="di-inspector__row">
-          <span>Direction</span>
-          <button
-            type="button"
-            className="di-inspector__toggle"
-            onClick={() => onUpdateLink({ direction: link.direction === 'EB/WB' ? 'NB/SB' : 'EB/WB' })}
-          >{link.direction} ⇄</button>
-        </div>
-        <label className="di-inspector__row">
-          <span>Mode</span>
-          <select className="di-select" value={link.mode} onChange={(e) => onUpdateLink({ mode: e.target.value })}>
-            <option value="Full">Full</option>
-            <option value="Land Use">Land Use</option>
-            <option value="None">None</option>
-          </select>
-        </label>
+        <div className="di-inspector__head">LINK · Int {from?.num ?? '?'} ↔ Int {to?.num ?? '?'}</div>
         <button type="button" className="di-inspector__delete" onClick={() => onDeleteLink(link.id)}>
           <Trash2 size={13} /> Delete link
         </button>
@@ -542,7 +528,7 @@ function Inspector({
           type="button"
           className={`di-inspector__connect${armed ? ' di-inspector__connect--on' : ''}`}
           onClick={() => onStartConnect(intersection.id)}
-        >{armed ? 'Click a target… (Esc)' : 'Connect'}</button>
+        >{armed ? 'Click a target… (Esc)' : '🔗 Link'}</button>
         <button type="button" className="di-inspector__delete" onClick={() => onDeleteIntersection(intersection.id)}>
           <Trash2 size={13} /> Delete
         </button>
