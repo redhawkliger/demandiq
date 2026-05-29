@@ -278,6 +278,14 @@ export default function S6_RunAnalysis() {
       <footer className="di-s6__footer">
         <button
           type="button"
+          className="di-btn-secondary"
+          disabled={!hasResults || isRunning}
+          onClick={() => navigate('/results')}
+        >
+          Skip to results →
+        </button>
+        <button
+          type="button"
           className="di-btn-primary"
           disabled={!hasResults || isRunning}
           onClick={() => navigate('/review-drops')}
