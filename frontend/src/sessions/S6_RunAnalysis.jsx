@@ -10,6 +10,7 @@ import {
   setLastRun,
   setBalancing,
   clearAllOverrides,
+  resolveLinkMode,
 } from '../store/projectStore'
 import { exportDiagnostics } from '../lib/diagnostics'
 
@@ -384,9 +385,7 @@ export default function S6_RunAnalysis() {
             <ResolvedTargets
               am={amResolved}
               pm={pmResolved}
-              linkBalanceModes={balancing.linkBalanceModes}
               intersections={intersections}
-              links={snap.links || []}
             />
           )}
 
@@ -586,26 +585,17 @@ function DropsBanner({ drops, onReview }) {
 }
 
 // ── ResolvedTargets ──────────────────────────────────────────────────────
-function ResolvedTargets({ am, pm, linkBalanceModes, intersections, links }) {
+function ResolvedTargets({ am, pm, intersections }) {
   const [open, setOpen] = useState(false)
   const idByNum = new Map(intersections.map((it) => [String(it.num), it.id]))
 
-  // mode lookup: store links keyed by intersection IDs in the order S2 sorted.
-  // linkBalanceModes is keyed by `${aId}__${bId}` for consecutive pairs.
+  // Effective mode lookup is now centralised in the store. Both directions
+  // (a→b and b→a) + linkBalanceModes vs store.links fallback live there.
   const modeFor = (fromNum, toNum) => {
     const fromId = idByNum.get(String(fromNum))
     const toId = idByNum.get(String(toNum))
     if (!fromId || !toId) return '—'
-    // Try both directions; store keys are corridor-order so use either.
-    const k1 = `${fromId}__${toId}`
-    const k2 = `${toId}__${fromId}`
-    const fromModes = linkBalanceModes?.[k1] || linkBalanceModes?.[k2]
-    if (fromModes?.mode) return fromModes.mode
-    // Fall back to actual store link
-    const L = (links || []).find(
-      (x) => (x.fromId === fromId && x.toId === toId) || (x.fromId === toId && x.toId === fromId),
-    )
-    return L?.mode ?? 'Full'
+    return resolveLinkMode(fromId, toId)
   }
 
   // Merge AM/PM by composite key.

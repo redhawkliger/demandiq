@@ -10,6 +10,7 @@ import {
   clearOverride,
   clearAllOverrides,
   clampOverrideToRaw,
+  resolveLinkMode,
 } from '../store/projectStore'
 import MapView from '../components/MapView'
 import { buildLinkFlows, lastRunStaleness } from '../lib/flowMap'
@@ -55,15 +56,22 @@ function finalVolumeFor(period, intNum, mv, balanced, overrides) {
   return balanced?.[period]?.[intNum]?.[mv] ?? 0
 }
 
-function computeLinkConservationFinal(period, links, balanced, overrides) {
+function computeLinkConservationFinal(period, links, balanced, overrides, intersections) {
   const out = []
+  // `links` here is the backend's lastRun.linkConservation rows (keyed by
+  // num, not id). Build a num→id lookup so resolveLinkMode — which keys on
+  // intersection id — can be called per row.
+  const idByNum = new Map((intersections ?? []).map((it) => [it.num, it.id]))
   const sortedKeys = [...links].sort((a, b) => {
     if (a.fromNum !== b.fromNum) return a.fromNum - b.fromNum
     if (a.toNum !== b.toNum) return a.toNum - b.toNum
     return String(a.direction).localeCompare(String(b.direction))
   })
   for (const link of sortedKeys) {
-    const { fromNum: u, toNum: d, direction, mode } = link
+    const { fromNum: u, toNum: d, direction } = link
+    // Route mode through the shared resolver so S6 ResolvedTargets and this
+    // table never disagree on a link's effective mode (PRD-01).
+    const mode = resolveLinkMode(idByNum.get(u), idByNum.get(d))
     const outflow = DIR_OUTFLOW[direction].reduce(
       (acc, k) => acc + finalVolumeFor(period, u, k, balanced, overrides), 0
     ) + finalVolumeFor(period, u, DIR_OUTFLOW_U[direction], balanced, overrides)
@@ -213,10 +221,10 @@ export default function S7_ReviewDrops() {
     for (const period of PERIODS) {
       const base = lastRun?.linkConservation?.[period] ?? []
       if (base.length === 0) continue
-      result[period] = computeLinkConservationFinal(period, base, balancedByPeriod, overrides)
+      result[period] = computeLinkConservationFinal(period, base, balancedByPeriod, overrides, intersections)
     }
     return result
-  }, [lastRun, balancedByPeriod, overrides])
+  }, [lastRun, balancedByPeriod, overrides, intersections])
 
   const onClickHeader = (key) => {
     if (key === 'override') return     // not sortable
@@ -732,7 +740,7 @@ function LinkFlowPopup({ link, intersections, viewMode, lastRun, overrides, pos,
         Link <span className="di-link-popup__num">{post.from.num}</span>
         {' ↔ '}
         <span className="di-link-popup__num">{post.to.num}</span>
-        <span className="di-flow-popup__mode">{link.mode}</span>
+        <span className="di-flow-popup__mode">{resolveLinkMode(link.fromId, link.toId)}</span>
       </div>
       {post.directeds.map((pd, idx) => {
         const preMatch = pre.directeds.find(

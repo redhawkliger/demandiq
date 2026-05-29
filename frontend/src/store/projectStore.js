@@ -428,6 +428,38 @@ export function getCorridorDir() {
   return getSnapshot().analysis?.corridorDir ?? null
 }
 
+/**
+ * Single source of truth for a link's effective balance mode between two
+ * intersections. Consumed by S6 (ResolvedTargets) and S7 (link conservation
+ * + flow popup) so the two screens never disagree on what mode the algorithm
+ * is treating a link as.
+ *
+ * Resolution order:
+ *   1. balancing.linkBalanceModes — keyed by pair `${fromId}__${toId}` or
+ *      `${toId}__${fromId}` (S5 edits land here via setLinkBalanceMode).
+ *   2. store.links[] — the link's creation-time `mode` field, either direction.
+ *   3. Default 'Full'.
+ *
+ * Returns one of: 'Full' | 'Land Use' | 'None'.
+ *
+ * @param {string} fromId intersection id (NOT num)
+ * @param {string} toId   intersection id (NOT num)
+ */
+export function resolveLinkMode(fromId, toId) {
+  if (!_initialized) _initSnapshot()
+  if (!fromId || !toId) return 'Full'
+  const bal = _snapshot.balancing ?? {}
+  const modes = bal.linkBalanceModes ?? {}
+  const entry = modes[`${fromId}__${toId}`] || modes[`${toId}__${fromId}`]
+  if (entry?.mode) return entry.mode
+  const links = _snapshot.links ?? []
+  const L = links.find(
+    (l) => (l.fromId === fromId && l.toId === toId) ||
+           (l.fromId === toId && l.toId === fromId)
+  )
+  return L?.mode ?? 'Full'
+}
+
 export function setCorridorDir(dir) {
   if (!_initialized) _initSnapshot()
   const analysis = { ...(_snapshot.analysis ?? {}), corridorDir: dir }
