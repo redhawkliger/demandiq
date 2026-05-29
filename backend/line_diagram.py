@@ -579,3 +579,158 @@ def render_diagram_grid(cells, view_mode='combined', cols=GRID_DEFAULT_COLS, tit
     plt.close(fig)
     buf.seek(0)
     return buf.read()
+
+
+# ── PRD-03: corridor diagram with link-volume labels ─────────────────────────
+def _primary_direction_pair(corridor_dir):
+    """Split a corridor dir like 'EB/WB' or 'NB/SB' into the forward + reverse
+    single-direction codes. Returns (forward, reverse). Forward is the first
+    token (the corridor's stated primary direction)."""
+    if not corridor_dir or '/' not in corridor_dir:
+        return (None, None)
+    a, b = corridor_dir.split('/', 1)
+    return (a.strip(), b.strip())
+
+
+def _segment_label_for_pair(from_num, to_num, resolved_links, corridor_dir):
+    """Find the resolved-links entry for the segment between two adjacent
+    intersections in the corridor's primary direction.
+
+    Tries the corridor's forward direction first (e.g. EB), then the reverse
+    (WB) so a label is rendered regardless of which way `from_num` → `to_num`
+    points. Returns (text, volume) or (None, None) if no match.
+    """
+    if not resolved_links:
+        return (None, None)
+    fwd, rev = _primary_direction_pair(corridor_dir)
+
+    def _find(f, t, direction):
+        for r in resolved_links:
+            if (int(r.get('fromNum')) == f
+                    and int(r.get('toNum')) == t
+                    and r.get('direction') == direction):
+                return r
+        return None
+
+    chosen = None
+    if fwd:
+        chosen = _find(from_num, to_num, fwd)
+    if chosen is None and rev:
+        chosen = _find(from_num, to_num, rev)
+    # Try the swapped pair too — corridor cell ordering doesn't always match
+    # the resolved-link key ordering when the link goes the "other" way.
+    if chosen is None and fwd:
+        chosen = _find(to_num, from_num, fwd)
+    if chosen is None and rev:
+        chosen = _find(to_num, from_num, rev)
+
+    if chosen is None:
+        return (None, None)
+    vol = chosen.get('volume')
+    if vol is None:
+        return (None, None)
+    text = f"{int(chosen['fromNum'])}→{int(chosen['toNum'])}: {int(round(float(vol)))} veh"
+    return (text, float(vol))
+
+
+def render_corridor_diagram(cells, resolved_links, corridor_dir, period_label,
+                            view_mode='combined', cols=GRID_DEFAULT_COLS,
+                            title=None):
+    """PRD-03: render the corridor as a grid of intersection cells with
+    link-volume labels drawn on the corridor segments BETWEEN adjacent cells.
+
+    Per-cell rendering is byte-identical to render_diagram_grid (same preset,
+    same _dg_draw_cell call, same layout math). The only addition is a thin
+    label drawn at each adjacent-pair boundary in figure coords.
+
+    Args:
+      cells: list of {geo, u_vols, b_vols, overrides, period_label}, in
+             corridor order. Adjacent entries that share a row will get a
+             segment label between them.
+      resolved_links: list[{fromNum, toNum, direction, volume}] for THIS period
+                      (i.e. lastRun.resolvedLinks[period]). May be empty —
+                      the diagram still renders cleanly with no labels.
+      corridor_dir: 'EB/WB' or 'NB/SB' — used to pick which resolved-link
+                    direction is the corridor's primary flow.
+      period_label: 'AM' or 'PM' — drawn as the per-cell tag AND used in the
+                    title if title is None.
+      view_mode: label mode applied to every cell.
+      cols: columns in the grid (rows derived).
+      title: optional banner drawn across the top. If None, no banner.
+
+    Returns: bytes (PNG). Raises ValueError if `cells` is empty.
+    """
+    n = len(cells)
+    if n == 0:
+        raise ValueError("render_corridor_diagram: no cells to render")
+
+    label_fn = _make_label_fn(view_mode)
+    cols = max(1, min(int(cols), n))
+    rows = math.ceil(n / cols)
+    cell_in = FIG_INCHES
+    p = _single_cell_preset(cell_in)
+
+    title_h = 0.6 if title else 0.0
+    fig_w = cols * cell_in
+    fig_h = rows * cell_in + title_h
+    fig = plt.figure(figsize=(fig_w, fig_h), facecolor=DG_WHITE)
+
+    cell_frac_w = 1.0 / cols
+    grid_frac_h = (rows * cell_in) / fig_h
+    cell_frac_h = grid_frac_h / rows
+
+    # Apply per-cell period_label override so AM/PM tag shows on every cell.
+    for i, c in enumerate(cells):
+        r = i // cols
+        col = i % cols
+        left = col * cell_frac_w
+        bottom = (rows - 1 - r) * cell_frac_h
+        ax = fig.add_axes([left, bottom, cell_frac_w, cell_frac_h])
+        _dg_draw_cell(
+            ax, c['geo'], c.get('u_vols') or {}, c.get('b_vols') or {},
+            p, label_fn, c.get('overrides') or {},
+            period_label=c.get('period_label') or period_label,
+        )
+
+    # Segment labels: walk adjacent pairs that share a row. The label sits at
+    # the cell boundary in figure-fraction coords, centered vertically on the
+    # cell's road axis (y = cell midpoint). Font matches the per-cell volume
+    # label font so it reads as part of the diagram, not chrome.
+    fs_seg = p['fs_vol']
+    for i in range(n - 1):
+        r = i // cols
+        r_next = (i + 1) // cols
+        if r != r_next:
+            continue                    # row wrap — no in-figure adjacency
+        a_geo = cells[i]['geo']
+        b_geo = cells[i + 1]['geo']
+        text, _vol = _segment_label_for_pair(
+            int(a_geo['num']), int(b_geo['num']), resolved_links, corridor_dir,
+        )
+        if text is None:
+            continue
+        col_a = i % cols
+        # Boundary x sits between cell i and cell i+1 in figure coords.
+        x = (col_a + 1) * cell_frac_w
+        # y centered on the cell's interior — cells span [bottom, bottom+cell_frac_h]
+        # and the road axis runs through cy=0.5 in axis coords.
+        bottom = (rows - 1 - r) * cell_frac_h
+        y = bottom + cell_frac_h * 0.5
+        # White bbox keeps the label readable when it lands over the road arm
+        # or arrow geometry. No new color encoding — pure black text.
+        fig.text(
+            x, y, text, ha='center', va='center',
+            fontsize=fs_seg, color=DG_BLACK, fontweight='bold', zorder=20,
+            bbox=dict(facecolor=DG_WHITE, edgecolor=DG_BLACK, lw=0.6,
+                      boxstyle='round,pad=0.25'),
+        )
+
+    if title:
+        fig.text(0.5, 1 - (title_h / fig_h) / 2, title, ha='center', va='center',
+                 fontsize=14, fontweight='bold', color=DG_BLACK)
+
+    buf = io.BytesIO()
+    fig.savefig(buf, format='png', dpi=DPI, facecolor=DG_WHITE)
+    plt.close(fig)
+    buf.seek(0)
+    return buf.read()
