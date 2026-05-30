@@ -670,21 +670,43 @@ def render_corridor_diagram(cells, resolved_links, corridor_dir, period_label,
     cell_in = FIG_INCHES
     p = _single_cell_preset(cell_in)
 
+    # F6: collect labels for adjacent pairs whose cells fall on different rows
+    # of the grid (e.g. 3→4 when row 0 ends at int 3 and row 1 starts at int 4).
+    # These are dropped from the in-figure segment-label loop below but get
+    # surfaced in a footnote so the corridor flow story isn't partial.
+    wrap_segments = []
+    for i in range(n - 1):
+        if i // cols == (i + 1) // cols:
+            continue
+        a_geo = cells[i]['geo']
+        b_geo = cells[i + 1]['geo']
+        text, _vol = _segment_label_for_pair(
+            int(a_geo['num']), int(b_geo['num']), resolved_links, corridor_dir,
+        )
+        if text is not None:
+            wrap_segments.append(text)
+
     title_h = 0.6 if title else 0.0
+    # Reserve a thin footnote band for the cross-row segments when present.
+    footnote_h = 0.35 if wrap_segments else 0.0
     fig_w = cols * cell_in
-    fig_h = rows * cell_in + title_h
+    fig_h = rows * cell_in + title_h + footnote_h
     fig = plt.figure(figsize=(fig_w, fig_h), facecolor=DG_WHITE)
 
     cell_frac_w = 1.0 / cols
     grid_frac_h = (rows * cell_in) / fig_h
     cell_frac_h = grid_frac_h / rows
+    # Cell grid sits ABOVE the footnote band — shift the row baseline up by
+    # the footnote's fractional height so the figure layout is sane when the
+    # footnote band exists.
+    footnote_frac_h = footnote_h / fig_h
 
     # Apply per-cell period_label override so AM/PM tag shows on every cell.
     for i, c in enumerate(cells):
         r = i // cols
         col = i % cols
         left = col * cell_frac_w
-        bottom = (rows - 1 - r) * cell_frac_h
+        bottom = footnote_frac_h + (rows - 1 - r) * cell_frac_h
         ax = fig.add_axes([left, bottom, cell_frac_w, cell_frac_h])
         _dg_draw_cell(
             ax, c['geo'], c.get('u_vols') or {}, c.get('b_vols') or {},
@@ -714,7 +736,7 @@ def render_corridor_diagram(cells, resolved_links, corridor_dir, period_label,
         x = (col_a + 1) * cell_frac_w
         # y centered on the cell's interior — cells span [bottom, bottom+cell_frac_h]
         # and the road axis runs through cy=0.5 in axis coords.
-        bottom = (rows - 1 - r) * cell_frac_h
+        bottom = footnote_frac_h + (rows - 1 - r) * cell_frac_h
         y = bottom + cell_frac_h * 0.5
         # White bbox keeps the label readable when it lands over the road arm
         # or arrow geometry. No new color encoding — pure black text.
@@ -728,6 +750,16 @@ def render_corridor_diagram(cells, resolved_links, corridor_dir, period_label,
     if title:
         fig.text(0.5, 1 - (title_h / fig_h) / 2, title, ha='center', va='center',
                  fontsize=14, fontweight='bold', color=DG_BLACK)
+
+    # F6: footnote naming segments at row wraps. Sits in the reserved band
+    # below the grid; smaller italic so it reads as a caption.
+    if wrap_segments:
+        footnote = "Cross-row segments: " + ", ".join(wrap_segments)
+        fig.text(
+            0.5, footnote_frac_h / 2, footnote,
+            ha='center', va='center',
+            fontsize=max(8, fs_seg - 2), color=DG_BLACK, style='italic',
+        )
 
     buf = io.BytesIO()
     fig.savefig(buf, format='png', dpi=DPI, facecolor=DG_WHITE)

@@ -428,11 +428,28 @@ async def balance_nchrp_endpoint(payload: dict):
     pm_result = balance_nchrp(pm_raw, active_links, method=method, coords=coords,
                               tol=tol, max_iter=max_iter)
 
-    def _serialize_resolved(resolved):
-        return [
-            {"fromNum": u, "toNum": d, "direction": dirn, "volume": v}
-            for (u, d, dirn), v in resolved.items()
-        ]
+    def _serialize_resolved(resolved, raw_pairs):
+        """F7: each resolved-link entry now also carries the raw upstream and
+        downstream counts that fed it, plus the absolute reconciliation
+        delta. Lets the frontend surface 'algorithm smoothed away 300 veh of
+        disagreement' instead of just the smoothed result."""
+        out = []
+        for (u, d, dirn), v in resolved.items():
+            pair = raw_pairs.get((u, d, dirn)) or {}
+            raw_up = pair.get('raw_upstream')
+            raw_dn = pair.get('raw_downstream')
+            entry = {
+                "fromNum": u, "toNum": d, "direction": dirn, "volume": v,
+                "raw_upstream":   raw_up if raw_up is not None else None,
+                "raw_downstream": raw_dn if raw_dn is not None else None,
+                "reconciliation_delta": (
+                    abs(raw_dn - raw_up)
+                    if raw_up is not None and raw_dn is not None
+                    else None
+                ),
+            }
+            out.append(entry)
+        return out
 
     # Tag QC flags by period
     qc_all = []
@@ -478,8 +495,8 @@ async def balance_nchrp_endpoint(payload: dict):
             "PM": {str(n): vols for n, vols in pm_result['balanced'].items()},
         },
         "resolved_links": {
-            "AM": _serialize_resolved(am_result['resolved_links']),
-            "PM": _serialize_resolved(pm_result['resolved_links']),
+            "AM": _serialize_resolved(am_result['resolved_links'], am_result.get('raw_link_pairs', {})),
+            "PM": _serialize_resolved(pm_result['resolved_links'], pm_result.get('raw_link_pairs', {})),
         },
         "iterations": {
             "AM": {str(n): i for n, i in am_result['iterations'].items()},

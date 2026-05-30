@@ -541,6 +541,15 @@
   color: var(--text-secondary);
   font-variant-numeric: tabular-nums;
 }
+/* F4: IPF-stability line — quieter than the sub so it reads as supporting
+ * context, not the result. Engineers should land on link conservation
+ * (headline) first, not "10/10 converged" (matrix stability per int). */
+.di-s6-hero2__ipf {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+  margin-top: 2px;
+}
 
 /* ── Run metadata (collapsible) ──────────────────────────────────────── */
 .di-s6-meta {
@@ -668,6 +677,9 @@
   color: var(--text-primary);
 }
 .di-s6-rt__row--warn td { color: #FFD27A; }
+/* F7: smoothed-row tone — lighter than --warn since "raw counts disagreed
+ * by X veh, algorithm reconciled" is informational, not an error. */
+.di-s6-rt__row--smoothed td { color: #C5D0FA; }
 .di-s6-rt__warn-cell { color: #FFD27A; font-size: 10px; white-space: nowrap; }
 
 /* ── Convergence: peak-iter headroom bar ─────────────────────────────── */

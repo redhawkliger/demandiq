@@ -22,6 +22,12 @@ import '../styles/analysis.css'
 // Sanity threshold: a Full-mode link with a resolved volume below this is
 // almost certainly a missing/wrong raw count rather than a genuinely tiny link.
 const SUSPICIOUS_VOLUME_VEH = 10
+// F7: reconciliation_delta = |raw_upstream - raw_downstream|. Below this
+// threshold the algorithm's smoothing is normal daily-count noise; above it,
+// the engineer should know how much the algorithm hid from them (e.g. the
+// audit fixture's planted 300-veh disagreement at Int 8↔9 used to silently
+// resolve to delta=0).
+const RECON_DELTA_NOTABLE_VEH = 20
 
 function hasAnyVolumes(intersections) {
   for (const it of intersections) {
@@ -130,26 +136,59 @@ function configDiff(runCfg, balancing) {
   return diffs
 }
 
+// F5 — Drops banner severity bucketing. A "drop" is `balanced - raw < 0`.
+// Under Larger method most drops are routine sub-5-veh wobble from
+// post-IPF rounding; a handful are the real engineering concern. Splitting
+// counts at MAJOR_DROP_THRESHOLD_VEH gives the engineer the right summary
+// at a glance instead of a single count that hides the severity.
+const MAJOR_DROP_THRESHOLD_VEH = 40
+
 // Summarize drops per-period from movementsReview.
-// Returns { AM:{count, largest:{value,intNum,mv}}, PM:{...} }.
+// Returns { AM:{count, major, minor, largest:{value,intNum,mv}, majorInts:Set}, PM:{...} }.
 function dropsSummary(review) {
-  const empty = { count: 0, largest: null }
+  const empty = { count: 0, major: 0, minor: 0, largest: null, majorInts: [] }
   const out = { AM: empty, PM: empty }
   for (const period of ['AM', 'PM']) {
     const arr = review?.[period] ?? []
     let count = 0
+    let major = 0
+    let minor = 0
     let largest = null
+    const majorIntsSet = new Set()
     for (const r of arr) {
       if (r.delta < 0) {
         count++
-        if (!largest || r.delta < largest.delta) {
+        if (Math.abs(r.delta) >= MAJOR_DROP_THRESHOLD_VEH) {
+          major++
+          majorIntsSet.add(r.int_num)
+        } else {
+          minor++
+        }
+        if (!largest || r.delta < largest.value) {
           largest = { value: r.delta, intNum: r.int_num, mv: r.movement }
         }
       }
     }
-    out[period] = { count, largest }
+    const sortedInts = Array.from(majorIntsSet).sort((a, b) => a - b)
+    out[period] = { count, major, minor, largest, majorInts: sortedInts }
   }
   return out
+}
+
+function formatIntRange(nums) {
+  if (nums.length === 0) return ''
+  if (nums.length === 1) return `Int ${nums[0]}`
+  // Compress consecutive runs (e.g. [4,5,6] → 'Int 4–6'; [4,6,9] → 'Int 4, 6, 9').
+  const runs = []
+  let runStart = nums[0]
+  let prev = nums[0]
+  for (let i = 1; i < nums.length; i++) {
+    if (nums[i] === prev + 1) { prev = nums[i]; continue }
+    runs.push(runStart === prev ? `${runStart}` : `${runStart}–${prev}`)
+    runStart = nums[i]; prev = nums[i]
+  }
+  runs.push(runStart === prev ? `${runStart}` : `${runStart}–${prev}`)
+  return `Int ${runs.join(', ')}`
 }
 
 // Tri-color tier for link conservation delta — green 0 / amber <5 / red ≥5.
@@ -300,6 +339,12 @@ export default function S6_RunAnalysis() {
   const lcViolations = lcRows.filter(({ a, p }) =>
     Math.abs(a.delta) > 0.5 || (p && Math.abs(p.delta) > 0.5),
   ).length
+  // F4: the worst single delta across AM + PM, used in the hero headline so
+  // the engineer instantly sees the magnitude they're chasing.
+  const lcLargestDelta = lcRows.reduce((max, { a, p }) => {
+    const candidate = Math.max(Math.abs(a.delta ?? 0), Math.abs(p?.delta ?? 0))
+    return candidate > max ? candidate : max
+  }, 0)
   const lcTotal = lcRows.length
   const allConverged = amOk === total && pmOk === total
   const allConserved = lcViolations === 0
@@ -366,6 +411,7 @@ export default function S6_RunAnalysis() {
               allConserved={allConserved}
               amOk={amOk} pmOk={pmOk} total={total}
               lcViolations={lcViolations} lcTotal={lcTotal}
+              lcLargestDelta={lcLargestDelta}
               method={runMethod}
               tolerance={runTol}
               ageLabel={formatAge(lastRun?.timestamp)}
@@ -501,36 +547,40 @@ export default function S6_RunAnalysis() {
 // ── HeroStrip ───────────────────────────────────────────────────────────
 function HeroStrip({
   state, isRunning, allConverged, allConserved,
-  amOk, pmOk, total, lcViolations, lcTotal,
+  amOk, pmOk, total, lcViolations, lcTotal, lcLargestDelta,
   method, tolerance, ageLabel,
   linkResolutionSkipped, linksConfigured,
 }) {
+  // F4: lead with link conservation (the real corridor-correctness signal).
+  // Demote per-intersection IPF convergence to a quiet tertiary line below
+  // the sub — it's a matrix-stability statement about each intersection
+  // independently, not a "the corridor balanced" signal.
   const headline = (() => {
     if (isRunning) return 'Running balance…'
-    // F1: the project had corridor links but the run produced zero resolved
-    // entries (backend either dropped them or no longer accepts the format).
-    // Take over the headline so the engineer cannot read it as "all clean".
     if (linkResolutionSkipped) {
+      // F1
       return `Link resolution skipped — ${linksConfigured} link${linksConfigured === 1 ? '' : 's'} configured, 0 resolved`
     }
-    const parts = []
-    parts.push(allConserved
-      ? `${lcTotal}/${lcTotal} links conserve ✓`
-      : `${lcTotal - lcViolations}/${lcTotal} links conserve · ${lcViolations} off`)
-    parts.push(allConverged
-      ? `AM ${amOk}/${total} · PM ${pmOk}/${total} converged`
-      : `AM ${amOk}/${total} · PM ${pmOk}/${total} converged (${(total - amOk) + (total - pmOk)} missed)`)
-    return parts.join('  ·  ')
+    if (allConserved) {
+      return `All ${lcTotal} links conserve ✓`
+    }
+    return `${lcViolations}/${lcTotal} link inconsistencies · largest ${lcLargestDelta.toFixed(1)} veh`
   })()
   const methodLabel = method === 'average' ? 'Average' : 'Larger'
+  const subLine = linkResolutionSkipped
+    ? 'Verify each link\'s corridor direction in S2 (axis form: EB/WB or NB/SB). The corridor balance did not engage; per-intersection IPF ran independently.'
+    : `Method: ${methodLabel} · Tolerance: ${Number(tolerance).toFixed(2)} veh${ageLabel ? ` · Run ${ageLabel}` : ''}`
+  const ipfMissed = (total - amOk) + (total - pmOk)
+  const ipfLine = !linkResolutionSkipped && (
+    allConverged
+      ? `AM ${amOk}/${total} · PM ${pmOk}/${total} intersections IPF-stable`
+      : `AM ${amOk}/${total} · PM ${pmOk}/${total} IPF-stable (${ipfMissed} hit max iter)`
+  )
   return (
     <div className={`di-s6-hero2 di-s6-hero2--${state}`}>
       <div className="di-s6-hero2__head">{headline}</div>
-      <div className="di-s6-hero2__sub">
-        {linkResolutionSkipped
-          ? 'Verify each link\'s corridor direction in S2 (axis form: EB/WB or NB/SB). The corridor balance did not engage; per-intersection IPF ran independently.'
-          : <>Method: {methodLabel} · Tolerance: {Number(tolerance).toFixed(2)} veh{ageLabel ? ` · Run ${ageLabel}` : ''}</>}
-      </div>
+      <div className="di-s6-hero2__sub">{subLine}</div>
+      {ipfLine && <div className="di-s6-hero2__ipf">{ipfLine}</div>}
     </div>
   )
 }
@@ -581,13 +631,26 @@ function RunMetadata({ lastRun, balancing, cfgDiffs }) {
 }
 
 // ── DropsBanner ──────────────────────────────────────────────────────────
+// F5: split the per-period summary into major/minor buckets at
+// MAJOR_DROP_THRESHOLD_VEH so the engineer's eye lands on severity, not a
+// raw count. "5 drops > 40 veh (Int 4–6), 36 smaller. Largest -95 (Int 6 EBT)"
+// reads as "five things to check" not "forty-one things to scroll through."
 function DropsBanner({ drops, onReview }) {
   const line = (p) => {
     const d = drops[p]
     if (d.count === 0) return null
     const where = d.largest ? ` (Int ${d.largest.intNum} ${d.largest.mv})` : ''
     const largestVal = d.largest ? `${d.largest.value} veh${where}` : '—'
-    return `${p}: ${d.count} movement${d.count === 1 ? '' : 's'} dropped below raw, largest ${largestVal}`
+    const parts = [p + ':']
+    if (d.major > 0) {
+      const intRange = d.majorInts.length > 0 ? ` (${formatIntRange(d.majorInts)})` : ''
+      parts.push(`${d.major} drop${d.major === 1 ? '' : 's'} ≥ ${MAJOR_DROP_THRESHOLD_VEH} veh${intRange}`)
+      if (d.minor > 0) parts.push(`+ ${d.minor} smaller`)
+    } else {
+      parts.push(`${d.minor} drop${d.minor === 1 ? '' : 's'} below raw`)
+    }
+    parts.push(`· largest ${largestVal}`)
+    return parts.join(' ')
   }
   return (
     <div className="di-s6-drops">
@@ -629,9 +692,18 @@ function ResolvedTargets({ am, pm, intersections }) {
       (Number(a.volume) > 0 && Number(a.volume) < SUSPICIOUS_VOLUME_VEH) ||
       (p && Number(p.volume) > 0 && Number(p.volume) < SUSPICIOUS_VOLUME_VEH)
     )
-    return { a, p, mode, suspicious }
+    // F7: peak reconciliation delta across periods. If both raw_upstream
+    // and raw_downstream came through, |dn - up| tells the engineer how
+    // far apart the two raw counts were; the algorithm picked one side
+    // (Larger) or averaged (Average) without telling them.
+    const amRecon = Number(a.reconciliation_delta ?? 0)
+    const pmRecon = Number(p?.reconciliation_delta ?? 0)
+    const reconPeak = Math.max(amRecon, pmRecon)
+    const smoothed = reconPeak >= RECON_DELTA_NOTABLE_VEH
+    return { a, p, mode, suspicious, amRecon, pmRecon, reconPeak, smoothed }
   })
   const suspiciousCount = rows.filter((r) => r.suspicious).length
+  const smoothedCount = rows.filter((r) => r.smoothed).length
 
   return (
     <div className="di-s6-rt">
@@ -640,6 +712,7 @@ function ResolvedTargets({ am, pm, intersections }) {
         <span className="di-s6-rt__summary">
           {rows.length} link{rows.length === 1 ? '' : 's'}
           {suspiciousCount > 0 ? ` · ${suspiciousCount} suspicious` : ''}
+          {smoothedCount > 0 ? ` · ${smoothedCount} reconciled raw counts` : ''}
           {' · values AM (PM)'}
         </span>
         <span className="di-s6-meta__chev">
@@ -654,22 +727,36 @@ function ResolvedTargets({ am, pm, intersections }) {
               <th>Dir</th>
               <th>Mode</th>
               <th style={{ textAlign: 'right' }}>Target volume</th>
+              <th style={{ textAlign: 'right' }} title="|raw upstream − raw downstream| that the algorithm reconciled">
+                Raw recon
+              </th>
               <th></th>
             </tr>
           </thead>
           <tbody>
-            {rows.map(({ a, p, mode, suspicious }, i) => (
-              <tr key={i} className={suspicious ? 'di-s6-rt__row--warn' : ''}>
+            {rows.map(({ a, p, mode, suspicious, amRecon, pmRecon, smoothed }, i) => (
+              <tr
+                key={i}
+                className={suspicious ? 'di-s6-rt__row--warn' : (smoothed ? 'di-s6-rt__row--smoothed' : '')}
+              >
                 <td>{a.fromNum} → {a.toNum}</td>
                 <td>{a.direction}</td>
                 <td>{mode}</td>
                 <td style={{ textAlign: 'right' }}>
                   {Math.round(a.volume)} ({p ? Math.round(p.volume) : '—'}) veh
                 </td>
+                <td style={{ textAlign: 'right' }}>
+                  {Math.round(amRecon)} ({p ? Math.round(pmRecon) : '—'}) veh
+                </td>
                 <td className="di-s6-rt__warn-cell">
                   {suspicious && (
                     <span title="Full-mode link with very low resolved volume — raw count likely missing or wrong">
                       ⚠ raw count?
+                    </span>
+                  )}
+                  {!suspicious && smoothed && (
+                    <span title="Raw upstream and downstream counts disagreed; algorithm picked one side (Larger) or averaged. Verify if the gap is real corridor demand or count error.">
+                      ⚠ smoothed
                     </span>
                   )}
                 </td>

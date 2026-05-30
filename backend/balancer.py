@@ -320,7 +320,7 @@ COORD_DEGENERACY_EPS = 1e-6
 
 
 def resolve_link_volumes(volumes, links, method='larger', coords=None,
-                          geometry_fallbacks=None):
+                          geometry_fallbacks=None, raw_pairs_out=None):
     """STEP A — collapse two adjacent intersection counts on the same link
     into ONE resolved volume per directed edge.
 
@@ -378,6 +378,11 @@ def resolve_link_volumes(volumes, links, method='larger', coords=None,
                 count_dn = sum(dn_vols.get(k, 0) for k in DIRECTION_SPEC[dir_code]['approach'])
                 resolved = max(count_up, count_dn) if method == 'larger' else (count_up + count_dn) / 2.0
                 out[(up, dn, dir_code)] = float(resolved)
+                if raw_pairs_out is not None:
+                    raw_pairs_out[(up, dn, dir_code)] = {
+                        'raw_upstream': float(count_up),
+                        'raw_downstream': float(count_dn),
+                    }
         elif axis == 'NB/SB':
             a_lat = coords.get(a, {}).get('lat')
             b_lat = coords.get(b, {}).get('lat')
@@ -394,6 +399,11 @@ def resolve_link_volumes(volumes, links, method='larger', coords=None,
                 count_dn = sum(dn_vols.get(k, 0) for k in DIRECTION_SPEC[dir_code]['approach'])
                 resolved = max(count_up, count_dn) if method == 'larger' else (count_up + count_dn) / 2.0
                 out[(up, dn, dir_code)] = float(resolved)
+                if raw_pairs_out is not None:
+                    raw_pairs_out[(up, dn, dir_code)] = {
+                        'raw_upstream': float(count_up),
+                        'raw_downstream': float(count_dn),
+                    }
     return out
 
 
@@ -1172,8 +1182,10 @@ def balance_nchrp(
     # warning rather than mystery NCHRP-LINK-DELTA residuals from a leg
     # whose orientation was guessed from int-number order.
     geometry_fallbacks = []
+    raw_link_pairs = {}
     resolved = resolve_link_volumes(raw_volumes, links, method=method, coords=coords,
-                                     geometry_fallbacks=geometry_fallbacks)
+                                     geometry_fallbacks=geometry_fallbacks,
+                                     raw_pairs_out=raw_link_pairs)
     links_by_int = _build_links_by_int(links, coords=coords)
 
     # ── Step B Level 1: balance_leg_totals (network leg-total reconciliation)
@@ -1454,6 +1466,12 @@ def balance_nchrp(
     return {
         'balanced': balanced,
         'resolved_links': resolved,
+        # F7: parallel dict of raw-count pairs that fed each resolved entry.
+        # Lets the deliverable surface the engineer-side question "how much did
+        # the algorithm smooth?" — a 300-veh discrepancy between upstream and
+        # downstream counts that the Larger method silently picked one side of
+        # is no longer invisible.
+        'raw_link_pairs': raw_link_pairs,
         'link_conservation': link_conservation,
         'movements_review': movements_review,
         'qc_flags': qc_flags,
