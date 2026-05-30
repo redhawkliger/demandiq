@@ -59,3 +59,20 @@ export function approachesForControl(approaches, control, corridorDir) {
   // One-way stop starts empty; Signalized / Roundabout / others clear all.
   return withFlag(() => false)
 }
+
+// Non-blocking guidance for the stop-leg row. Returns a hint string, or null when
+// nothing needs saying. The critical guard: a stop control with ZERO approaches
+// selected renders a stop-less diagram silently — the exact defect this feature
+// fixes — which happens for One-way stop (starts empty), Side-street stop, and
+// any stop control on a diagonal / unknown corridor (no smart default fires). So
+// prompt whenever the count is 0; refine for Two-way's typical 2.
+export function stopHint(control, stoppedCount) {
+  if (!STOP_CONTROL_TYPES.has(control)) return null // AWS auto-fills; others have no row
+  if (stoppedCount === 0) {
+    return 'None selected — the diagram will show no stop signs. Pick the controlled approach(es).'
+  }
+  if (control === 'Two-way stop' && stoppedCount !== 2) {
+    return 'Two-way stop typically has 2 approaches controlled.'
+  }
+  return null
+}

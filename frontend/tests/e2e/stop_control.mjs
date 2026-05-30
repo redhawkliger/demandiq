@@ -109,6 +109,16 @@ await page.waitForTimeout(150)
   expect('Two-way hint shows when count != 2', await page.locator('.di-stopleg__hint').count() === 1)
 }
 
+// ── One-way stop starts empty → silent-empty hint appears ───────────────────
+await clickControl('One-way stop')
+{
+  const ap = await readApproaches()
+  expect('One-way stop: starts with 0 selected', stoppedDirs(ap).length === 0)
+  const hint = await page.locator('.di-stopleg__hint').textContent().catch(() => '')
+  expect('One-way stop: zero-selected hint warns no stop signs render',
+    await page.locator('.di-stopleg__hint').count() === 1 && /no stop signs/i.test(hint || ''))
+}
+
 // ── Diagram renders stops at the checked legs ───────────────────────────────
 // Set a clean two-leg stop state (EB,WB) and render via the endpoint.
 await clickControl('Signalized'); await clickControl('Two-way stop')   // EB,WB

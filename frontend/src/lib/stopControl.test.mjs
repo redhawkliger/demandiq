@@ -7,6 +7,7 @@
 import {
   approachesForControl,
   crossStreetDirs,
+  stopHint,
   STOP_CONTROL_TYPES,
   AUTO_FILL_TYPES,
 } from './stopControl.js'
@@ -82,6 +83,23 @@ ok(STOP_CONTROL_TYPES.has('Two-way stop') && STOP_CONTROL_TYPES.has('Side-street
   'STOP_CONTROL_TYPES holds the three toggle types')
 ok(AUTO_FILL_TYPES.has('All-way stop') && !AUTO_FILL_TYPES.has('Two-way stop'),
   'AUTO_FILL_TYPES holds only All-way stop')
+
+// ── stopHint: the silent-empty guard for One-way / Side-street / diagonal ────
+// Zero selected on ANY stop control prompts (no stops would render).
+ok(stopHint('One-way stop', 0) !== null, 'One-way stop with 0 selected → hint')
+ok(/no stop signs/i.test(stopHint('One-way stop', 0)), 'zero hint warns no stop signs will render')
+ok(stopHint('Side-street stop', 0) !== null, 'Side-street stop with 0 selected → hint')
+ok(stopHint('Two-way stop', 0) !== null, 'Two-way stop with 0 selected (diagonal/unknown corridor) → hint')
+// One picked is fine for One-way / Side-street (no "typically 2" nag).
+ok(stopHint('One-way stop', 1) === null, 'One-way stop with 1 selected → no hint')
+ok(stopHint('Side-street stop', 1) === null, 'Side-street stop with 1 selected → no hint')
+// Two-way keeps its "typically 2" refinement for non-zero, non-2 counts.
+ok(/2 approaches/i.test(stopHint('Two-way stop', 1)), 'Two-way with 1 → typically-2 hint')
+ok(/2 approaches/i.test(stopHint('Two-way stop', 3)), 'Two-way with 3 → typically-2 hint')
+ok(stopHint('Two-way stop', 2) === null, 'Two-way with exactly 2 → no hint')
+// Auto-fill / non-stop controls never hint (no engineer action expected).
+ok(stopHint('All-way stop', 0) === null, 'All-way stop → no hint (auto-filled)')
+ok(stopHint('Signalized', 0) === null, 'Signalized → no hint (no row)')
 
 console.log(`stopControl: ${passed} passed, ${failed} failed`)
 if (failed > 0) process.exit(1)

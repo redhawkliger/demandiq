@@ -33,6 +33,7 @@ import {
 } from '../lib/geo'
 import {
   approachesForControl,
+  stopHint,
   STOP_CONTROL_TYPES,
   AUTO_FILL_TYPES,
   ACTIVE_DIRS,
@@ -576,8 +577,8 @@ function Inspector({
               )
             })}
           </div>
-          {control === 'Two-way stop' && stoppedCount !== 2 && (
-            <span className="di-stopleg__hint">Two-way stop typically has 2 approaches controlled.</span>
+          {stopHint(control, stoppedCount) && (
+            <span className="di-stopleg__hint">{stopHint(control, stoppedCount)}</span>
           )}
         </div>
       )}
