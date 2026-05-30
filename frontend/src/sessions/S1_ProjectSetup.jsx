@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { getProjectMeta, setProjectMeta } from '../store/projectStore'
+import { THEMES, getStoredTheme, applyTheme } from '../lib/theme'
+import ThemePickerModal from '../components/ThemePickerModal'
 import '../styles/forms.css'
 
 const todayISO = () => {
@@ -51,6 +53,14 @@ export default function S1_ProjectSetup() {
       if (saveTimer.current) clearTimeout(saveTimer.current)
     }
   }, [form])
+
+  // Appearance is a global, per-device preference — NOT project data — so it
+  // lives outside `form`/projectStore. The modal applies it live; we mirror the
+  // applied id here only to highlight the right card and the trigger swatch.
+  const [theme, setTheme] = useState(getStoredTheme)
+  const [themeOpen, setThemeOpen] = useState(false)
+  const activeTheme = THEMES.find((t) => t.id === theme) ?? THEMES[0]
+  const chooseTheme = (id) => setTheme(applyTheme(id))
 
   const update = (key, value) => setForm((f) => ({ ...f, [key]: value }))
 
@@ -166,12 +176,45 @@ export default function S1_ProjectSetup() {
           </div>
         </div>
 
+        <div className="di-field">
+          <label className="di-label">Appearance</label>
+          <button
+            type="button"
+            className="di-appearance-trigger"
+            onClick={() => setThemeOpen(true)}
+          >
+            <span
+              className="di-theme-card__swatch di-theme-card__swatch--sm"
+              aria-hidden="true"
+              style={{ background: activeTheme.swatch.bg }}
+            >
+              <span
+                className="di-theme-card__surface"
+                style={{ background: activeTheme.swatch.surface }}
+              />
+              <span
+                className="di-theme-card__accent"
+                style={{ background: activeTheme.swatch.accent }}
+              />
+            </span>
+            <span className="di-appearance-trigger__label">{activeTheme.label}</span>
+            <span className="di-appearance-trigger__action">Change</span>
+          </button>
+        </div>
+
         <div className="di-actions">
           <button type="submit" className="di-btn-primary" disabled={!isValid}>
             Save and continue →
           </button>
         </div>
       </div>
+
+      <ThemePickerModal
+        open={themeOpen}
+        value={theme}
+        onSelect={chooseTheme}
+        onClose={() => setThemeOpen(false)}
+      />
     </form>
   )
 }

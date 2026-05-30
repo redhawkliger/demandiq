@@ -4,6 +4,12 @@ import { createRoot } from 'react-dom/client'
 import './styles/themes.css'
 import './index.css'
 import App from './App.jsx'
+import { initTheme } from './lib/theme.js'
+
+// Apply the saved appearance preference before first paint so Sunshine users
+// don't flash the dark default. themes.css's bare :root keeps night-traffic as
+// the no-attribute fallback if nothing is stored.
+initTheme()
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>
