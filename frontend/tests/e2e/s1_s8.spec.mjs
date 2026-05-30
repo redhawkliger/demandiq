@@ -120,7 +120,7 @@ function makeHappyPathSeed() {
       id: `L${i + 1}`,
       fromId: intersections[i].id,
       toId: intersections[i + 1].id,
-      direction: 'NB',
+      direction: 'NB/SB',
       mode: 'Full',
     })
   }
@@ -148,7 +148,7 @@ function makeReorderSeed() {
   }
   const links = []
   for (let i = 0; i < 9; i++) {
-    links.push({ id: `L${i + 1}`, fromId: intersections[i].id, toId: intersections[i + 1].id, direction: 'NB', mode: 'Full' })
+    links.push({ id: `L${i + 1}`, fromId: intersections[i].id, toId: intersections[i + 1].id, direction: 'NB/SB', mode: 'Full' })
   }
   // Synthesize a lastRun the cascade should clear.
   const numsAM = Object.fromEntries(intersections.map((it) => [String(it.num), true]))
@@ -156,7 +156,10 @@ function makeReorderSeed() {
   const residAM = Object.fromEntries(intersections.map((it) => [String(it.num), 0.2]))
   const resolved = []
   for (let i = 0; i < 9; i++) {
-    resolved.push({ fromNum: i + 1, toNum: i + 2, direction: 'NB', volume: 120 })
+    // Backend emits one directed entry per axis-direction; for assertion
+    // purposes we only need the AM/PM presence, so a single per-link entry
+    // tagged with the axis is enough to drive the reorder seed.
+    resolved.push({ fromNum: i + 1, toNum: i + 2, direction: 'NB/SB', volume: 120 })
   }
   return {
     version: 1,

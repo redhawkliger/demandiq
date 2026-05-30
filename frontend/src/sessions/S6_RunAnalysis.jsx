@@ -304,7 +304,18 @@ export default function S6_RunAnalysis() {
   const allConverged = amOk === total && pmOk === total
   const allConserved = lcViolations === 0
   const hasDrops = drops.AM.count > 0 || drops.PM.count > 0
+  // F1: the project has corridor links configured but the run produced zero
+  // resolved-link entries — the backend silently dropped them, almost always
+  // because of an unrecognised direction value (axis 'NB/SB' is canonical;
+  // anything else is rejected post-fix but legacy/imported runs may still
+  // surface here). Without this gate, the hero would render
+  // "0/0 links conserve ✓" in green on a corridor that never balanced.
+  const linksConfigured = (snap.links || []).length
+  const linkResolutionSkipped =
+    hasResults && linksConfigured > 0 &&
+    amResolved.length === 0 && pmResolved.length === 0
   const heroState = !hasResults ? 'idle'
+    : linkResolutionSkipped ? 'fail'
     : !allConverged ? 'fail'
     : (!allConserved || hasDrops) ? 'warn'
     : 'ok'
@@ -358,6 +369,8 @@ export default function S6_RunAnalysis() {
               method={runMethod}
               tolerance={runTol}
               ageLabel={formatAge(lastRun?.timestamp)}
+              linkResolutionSkipped={linkResolutionSkipped}
+              linksConfigured={linksConfigured}
             />
           )}
 
@@ -490,9 +503,16 @@ function HeroStrip({
   state, isRunning, allConverged, allConserved,
   amOk, pmOk, total, lcViolations, lcTotal,
   method, tolerance, ageLabel,
+  linkResolutionSkipped, linksConfigured,
 }) {
   const headline = (() => {
     if (isRunning) return 'Running balance…'
+    // F1: the project had corridor links but the run produced zero resolved
+    // entries (backend either dropped them or no longer accepts the format).
+    // Take over the headline so the engineer cannot read it as "all clean".
+    if (linkResolutionSkipped) {
+      return `Link resolution skipped — ${linksConfigured} link${linksConfigured === 1 ? '' : 's'} configured, 0 resolved`
+    }
     const parts = []
     parts.push(allConserved
       ? `${lcTotal}/${lcTotal} links conserve ✓`
@@ -507,8 +527,9 @@ function HeroStrip({
     <div className={`di-s6-hero2 di-s6-hero2--${state}`}>
       <div className="di-s6-hero2__head">{headline}</div>
       <div className="di-s6-hero2__sub">
-        Method: {methodLabel} · Tolerance: {Number(tolerance).toFixed(2)} veh
-        {ageLabel ? ` · Run ${ageLabel}` : ''}
+        {linkResolutionSkipped
+          ? 'Verify each link\'s corridor direction in S2 (axis form: EB/WB or NB/SB). The corridor balance did not engage; per-intersection IPF ran independently.'
+          : <>Method: {methodLabel} · Tolerance: {Number(tolerance).toFixed(2)} veh{ageLabel ? ` · Run ${ageLabel}` : ''}</>}
       </div>
     </div>
   )

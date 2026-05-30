@@ -382,14 +382,30 @@ async def balance_nchrp_endpoint(payload: dict):
     # mode happens internally in balance_nchrp (None skipped from leg-total
     # balancing + reconciliation; Land Use balanced but not reconciled;
     # Full balanced + reconciled to canonical).
+    # F1: validate link.direction up front. resolve_link_volumes only accepts
+    # the corridor-axis form ('EB/WB' or 'NB/SB'); anything else (e.g. the
+    # cardinal 'NB') is silently skipped, producing an empty resolved_links
+    # array and a "0/0 links conserve ✓" hero on the frontend. Reject loud.
+    VALID_DIRECTIONS = ('EB/WB', 'NB/SB')
     active_links = []
     for L in links_in:
         if not isinstance(L, dict):
             raise HTTPException(status_code=400, detail="each link must be a dict")
+        direction = L.get("direction")
+        if direction not in VALID_DIRECTIONS:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"link {L.get('fromNum')}→{L.get('toNum')} has invalid direction "
+                    f"{direction!r} — expected one of {list(VALID_DIRECTIONS)}. "
+                    "If you exported state from an older DemandIQ build, re-create "
+                    "the link via S2 so suggestDirection assigns the corridor axis."
+                ),
+            )
         active_links.append({
             "fromNum": int(L["fromNum"]),
             "toNum":   int(L["toNum"]),
-            "direction": L.get("direction"),
+            "direction": direction,
             "mode":    L.get("mode", "Full"),
         })
 

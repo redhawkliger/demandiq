@@ -654,6 +654,66 @@ def test_geometry_fallback_deduped_across_am_pm():
     print(f"  test_geometry_fallback_deduped_across_am_pm: PASS (1 flag covers AM + PM)")
 
 
+def test_invalid_link_direction_rejected():
+    """F1: a link with direction='NB' (cardinal) instead of 'NB/SB' (axis)
+    used to be silently skipped by resolve_link_volumes, producing an empty
+    resolved_links + a misleading '0/0 links conserve ✓' hero on the
+    frontend. The /balance-nchrp endpoint now rejects such payloads with
+    HTTP 400 + a helpful message identifying the bad link."""
+    from fastapi.testclient import TestClient
+    from app import app
+
+    payload = {
+        "intersections": [
+            {"num": 1, "lat": 32.85, "lng": -116.85},
+            {"num": 2, "lat": 32.86, "lng": -116.85},
+        ],
+        "unbalanced_volumes": {
+            "AM": {"1": {"NBT": 480}, "2": {"NBT": 510}},
+            "PM": {"1": {"NBT": 560}, "2": {"NBT": 580}},
+        },
+        "links": [
+            {"fromNum": 1, "toNum": 2, "direction": "NB", "mode": "Full"},   # cardinal, not axis
+        ],
+        "link_resolution_method": "larger",
+    }
+    client = TestClient(app)
+    r = client.post("/balance-nchrp", json=payload)
+    assert r.status_code == 400, f"expected 400 on invalid direction; got {r.status_code}: {r.text}"
+    body = r.json()
+    detail = body.get('detail', '')
+    assert "'NB'" in detail, f"detail should quote the bad direction; got {detail!r}"
+    assert "1→2" in detail, f"detail should identify the link; got {detail!r}"
+    assert "EB/WB" in detail and "NB/SB" in detail, f"detail should list the valid options; got {detail!r}"
+    print(f"  test_invalid_link_direction_rejected: PASS (400 + identifies link 1→2 + lists valid axes)")
+
+
+def test_valid_link_directions_still_accepted():
+    """Regression guard: the validation rejects only unknown directions;
+    well-formed 'EB/WB' and 'NB/SB' links continue to balance cleanly."""
+    from fastapi.testclient import TestClient
+    from app import app
+
+    payload = {
+        "intersections": [
+            {"num": 1, "lat": 32.85, "lng": -116.85},
+            {"num": 2, "lat": 32.86, "lng": -116.85},
+        ],
+        "unbalanced_volumes": {
+            "AM": {"1": {"NBT": 480}, "2": {"NBT": 510}},
+            "PM": {"1": {"NBT": 560}, "2": {"NBT": 580}},
+        },
+        "links": [
+            {"fromNum": 1, "toNum": 2, "direction": "NB/SB", "mode": "Full"},
+        ],
+        "link_resolution_method": "larger",
+    }
+    client = TestClient(app)
+    r = client.post("/balance-nchrp", json=payload)
+    assert r.status_code == 200, f"valid 'NB/SB' direction should pass; got {r.status_code}: {r.text}"
+    print(f"  test_valid_link_directions_still_accepted: PASS (200 on 'NB/SB')")
+
+
 if __name__ == '__main__':
     tests = [
         test_furness_4x4_known_answer,
@@ -671,6 +731,8 @@ if __name__ == '__main__':
         test_geometry_fallback_fires_on_coincident_coords,
         test_geometry_fallback_one_per_link_not_per_int,
         test_geometry_fallback_deduped_across_am_pm,
+        test_invalid_link_direction_rejected,
+        test_valid_link_directions_still_accepted,
     ]
     passed = 0
     failed = 0
