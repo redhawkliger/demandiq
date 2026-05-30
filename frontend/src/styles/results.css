@@ -137,7 +137,7 @@
 }
 
 .di-s7-card__body {
-  background: #FFFFFF;
+  background: var(--bg-elevated);
   border-radius: 6px;
   overflow: hidden;
   min-height: 220px;
