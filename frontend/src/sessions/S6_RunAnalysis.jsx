@@ -13,6 +13,7 @@ import {
   resolveLinkMode,
 } from '../store/projectStore'
 import { exportDiagnostics } from '../lib/diagnostics'
+import { dropsSummary, formatIntRange, MAJOR_DROP_THRESHOLD_VEH } from '../lib/dropsSummary'
 
 import '../styles/forms.css'
 import '../styles/map.css'         // .di-banner, .di-btn-primary
@@ -136,60 +137,6 @@ function configDiff(runCfg, balancing) {
   return diffs
 }
 
-// F5 — Drops banner severity bucketing. A "drop" is `balanced - raw < 0`.
-// Under Larger method most drops are routine sub-5-veh wobble from
-// post-IPF rounding; a handful are the real engineering concern. Splitting
-// counts at MAJOR_DROP_THRESHOLD_VEH gives the engineer the right summary
-// at a glance instead of a single count that hides the severity.
-const MAJOR_DROP_THRESHOLD_VEH = 40
-
-// Summarize drops per-period from movementsReview.
-// Returns { AM:{count, major, minor, largest:{value,intNum,mv}, majorInts:Set}, PM:{...} }.
-function dropsSummary(review) {
-  const empty = { count: 0, major: 0, minor: 0, largest: null, majorInts: [] }
-  const out = { AM: empty, PM: empty }
-  for (const period of ['AM', 'PM']) {
-    const arr = review?.[period] ?? []
-    let count = 0
-    let major = 0
-    let minor = 0
-    let largest = null
-    const majorIntsSet = new Set()
-    for (const r of arr) {
-      if (r.delta < 0) {
-        count++
-        if (Math.abs(r.delta) >= MAJOR_DROP_THRESHOLD_VEH) {
-          major++
-          majorIntsSet.add(r.int_num)
-        } else {
-          minor++
-        }
-        if (!largest || r.delta < largest.value) {
-          largest = { value: r.delta, intNum: r.int_num, mv: r.movement }
-        }
-      }
-    }
-    const sortedInts = Array.from(majorIntsSet).sort((a, b) => a - b)
-    out[period] = { count, major, minor, largest, majorInts: sortedInts }
-  }
-  return out
-}
-
-function formatIntRange(nums) {
-  if (nums.length === 0) return ''
-  if (nums.length === 1) return `Int ${nums[0]}`
-  // Compress consecutive runs (e.g. [4,5,6] → 'Int 4–6'; [4,6,9] → 'Int 4, 6, 9').
-  const runs = []
-  let runStart = nums[0]
-  let prev = nums[0]
-  for (let i = 1; i < nums.length; i++) {
-    if (nums[i] === prev + 1) { prev = nums[i]; continue }
-    runs.push(runStart === prev ? `${runStart}` : `${runStart}–${prev}`)
-    runStart = nums[i]; prev = nums[i]
-  }
-  runs.push(runStart === prev ? `${runStart}` : `${runStart}–${prev}`)
-  return `Int ${runs.join(', ')}`
-}
 
 // Tri-color tier for link conservation delta — green 0 / amber <5 / red ≥5.
 function deltaTier(delta) {
