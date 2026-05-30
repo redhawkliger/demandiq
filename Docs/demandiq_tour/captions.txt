@@ -1,0 +1,12 @@
+DemandIQ session tour — captions (purpose · user's job-to-be-done)
+
+S1  Project Setup    · Capture project metadata (name, client, analyst, scenario, periods). JTBD: stamp the study so every export is correctly attributed before any analysis begins.
+S2  Map / Intersection · Place corridor intersections on the map and draw the balancing links between them. JTBD: define WHAT is being analyzed and how flow connects, by dropping pins and connecting them.
+S3  Approach Config  · Per-intersection wizard to set each leg's lanes/movements. JTBD: tell the model which movements physically exist at each intersection so balancing only touches real movements.
+S4  Volume Entry     · Enter or extract AM (PM) turning-movement counts per intersection. JTBD: get the raw observed counts into the project (typed, pasted, or auto-extracted from count sheets).
+S5  Balancing Settings · Choose link-resolution method, peak windows, convergence/iteration limits, per-link modes. JTBD: configure HOW the corridor will be balanced before running.
+S6  Run Analysis     · Execute the NCHRP balancing run and review convergence + QC. JTBD: run the balance and confirm it converged cleanly before trusting the numbers.
+S7  Results          · Review balanced volumes as line diagrams (pre/post, drops review, link conservation). JTBD: visually QA the balanced result and apply engineer overrides where a drop needs clamping.
+S8  Export           · Download the deliverables (Excel workbook, .demandiq.json, diagram grid PNG). JTBD: hand off the finished, balanced corridor as report-ready artifacts.
+
+States captured per session: empty (new project) · filled (Alpine/I-8 fixture: 3 intersections, 2 NB/SB links, AM (PM) volumes, completed balancing run) · edge (long intersection name — layout stress). Widths: 1024 / 1440 / 1920.

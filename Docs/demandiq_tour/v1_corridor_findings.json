@@ -1,0 +1,789 @@
+{
+  "runAt": "2026-05-30T00:47:54.889Z",
+  "fixture": {
+    "intersections": 10,
+    "links": 9,
+    "planted": [
+      "Int 4 + 5 share lat/lng (32.8410, -116.7619) — should fire GEOMETRY-FALLBACK",
+      "Int 6 SBT raw = 12 (typo — should be 1200) — should flag huge negative delta or large positive adjustment",
+      "Int 7 T-intersection (no E approach) — should pass through without all-leg balance",
+      "Int 9 NB outbound 690 vs Int 8 NB inbound 390 — internal inconsistency, should surface as NCHRP-LINK-DELTA or be reconciled away"
+    ]
+  },
+  "backend": {
+    "method": "larger",
+    "methodFromConfig": "larger",
+    "tolerance": 0.5,
+    "maxIterations": 500,
+    "timestamp": "2026-05-30T00:47:46.901Z",
+    "intConvergedAM": {
+      "1": true,
+      "2": true,
+      "3": true,
+      "4": true,
+      "5": true,
+      "6": true,
+      "7": true,
+      "8": true,
+      "9": true,
+      "10": true
+    },
+    "intConvergedPM": {
+      "1": true,
+      "2": true,
+      "3": true,
+      "4": true,
+      "5": true,
+      "6": true,
+      "7": true,
+      "8": true,
+      "9": true,
+      "10": true
+    },
+    "iterationsAM": {
+      "1": 6,
+      "2": 15,
+      "3": 11,
+      "4": 30,
+      "5": 35,
+      "6": 33,
+      "7": 30,
+      "8": 43,
+      "9": 28,
+      "10": 12
+    },
+    "iterationsPM": {
+      "1": 2,
+      "2": 14,
+      "3": 10,
+      "4": 29,
+      "5": 32,
+      "6": 36,
+      "7": 29,
+      "8": 38,
+      "9": 27,
+      "10": 11
+    },
+    "finalResidualAM": {
+      "1": 0.016426871423050216,
+      "2": 0.02222429466075937,
+      "3": 0.016146857361036382,
+      "4": 0.04213929159152485,
+      "5": 0.042444770422775946,
+      "6": 0.062034869049057306,
+      "7": 0.09114256057375769,
+      "8": 0.06541512628365354,
+      "9": 0.09206366270450417,
+      "10": 0.009919935463699403
+    },
+    "finalResidualPM": {
+      "1": 0.0020794533505750223,
+      "2": 0.03019452802345768,
+      "3": 0.010363302625137294,
+      "4": 0.03136489827886635,
+      "5": 0.04160008110511626,
+      "6": 0.05222372752666615,
+      "7": 0.0738116997946463,
+      "8": 0.06122854901104802,
+      "9": 0.0803632022691545,
+      "10": 0.01778157585772533
+    },
+    "resolvedLinksAM": [
+      {
+        "fromNum": 1,
+        "toNum": 2,
+        "direction": "NB",
+        "volume": 655
+      },
+      {
+        "fromNum": 2,
+        "toNum": 1,
+        "direction": "SB",
+        "volume": 670
+      },
+      {
+        "fromNum": 2,
+        "toNum": 3,
+        "direction": "NB",
+        "volume": 660
+      },
+      {
+        "fromNum": 3,
+        "toNum": 2,
+        "direction": "SB",
+        "volume": 650
+      },
+      {
+        "fromNum": 3,
+        "toNum": 4,
+        "direction": "NB",
+        "volume": 690
+      },
+      {
+        "fromNum": 4,
+        "toNum": 3,
+        "direction": "SB",
+        "volume": 625
+      },
+      {
+        "fromNum": 4,
+        "toNum": 5,
+        "direction": "NB",
+        "volume": 493
+      },
+      {
+        "fromNum": 5,
+        "toNum": 4,
+        "direction": "SB",
+        "volume": 490
+      },
+      {
+        "fromNum": 5,
+        "toNum": 6,
+        "direction": "NB",
+        "volume": 468
+      },
+      {
+        "fromNum": 6,
+        "toNum": 5,
+        "direction": "SB",
+        "volume": 464
+      },
+      {
+        "fromNum": 6,
+        "toNum": 7,
+        "direction": "NB",
+        "volume": 448
+      },
+      {
+        "fromNum": 7,
+        "toNum": 6,
+        "direction": "SB",
+        "volume": 440
+      },
+      {
+        "fromNum": 7,
+        "toNum": 8,
+        "direction": "NB",
+        "volume": 415
+      },
+      {
+        "fromNum": 8,
+        "toNum": 7,
+        "direction": "SB",
+        "volume": 435
+      },
+      {
+        "fromNum": 8,
+        "toNum": 9,
+        "direction": "NB",
+        "volume": 690
+      },
+      {
+        "fromNum": 9,
+        "toNum": 8,
+        "direction": "SB",
+        "volume": 422
+      },
+      {
+        "fromNum": 9,
+        "toNum": 10,
+        "direction": "NB",
+        "volume": 616
+      },
+      {
+        "fromNum": 10,
+        "toNum": 9,
+        "direction": "SB",
+        "volume": 485
+      }
+    ],
+    "resolvedLinksPM": [
+      {
+        "fromNum": 1,
+        "toNum": 2,
+        "direction": "NB",
+        "volume": 785
+      },
+      {
+        "fromNum": 2,
+        "toNum": 1,
+        "direction": "SB",
+        "volume": 810
+      },
+      {
+        "fromNum": 2,
+        "toNum": 3,
+        "direction": "NB",
+        "volume": 770
+      },
+      {
+        "fromNum": 3,
+        "toNum": 2,
+        "direction": "SB",
+        "volume": 790
+      },
+      {
+        "fromNum": 3,
+        "toNum": 4,
+        "direction": "NB",
+        "volume": 850
+      },
+      {
+        "fromNum": 4,
+        "toNum": 3,
+        "direction": "SB",
+        "volume": 745
+      },
+      {
+        "fromNum": 4,
+        "toNum": 5,
+        "direction": "NB",
+        "volume": 598
+      },
+      {
+        "fromNum": 5,
+        "toNum": 4,
+        "direction": "SB",
+        "volume": 595
+      },
+      {
+        "fromNum": 5,
+        "toNum": 6,
+        "direction": "NB",
+        "volume": 561
+      },
+      {
+        "fromNum": 6,
+        "toNum": 5,
+        "direction": "SB",
+        "volume": 560
+      },
+      {
+        "fromNum": 6,
+        "toNum": 7,
+        "direction": "NB",
+        "volume": 537
+      },
+      {
+        "fromNum": 7,
+        "toNum": 6,
+        "direction": "SB",
+        "volume": 533
+      },
+      {
+        "fromNum": 7,
+        "toNum": 8,
+        "direction": "NB",
+        "volume": 500
+      },
+      {
+        "fromNum": 8,
+        "toNum": 7,
+        "direction": "SB",
+        "volume": 520
+      },
+      {
+        "fromNum": 8,
+        "toNum": 9,
+        "direction": "NB",
+        "volume": 810
+      },
+      {
+        "fromNum": 9,
+        "toNum": 8,
+        "direction": "SB",
+        "volume": 512
+      },
+      {
+        "fromNum": 9,
+        "toNum": 10,
+        "direction": "NB",
+        "volume": 720
+      },
+      {
+        "fromNum": 10,
+        "toNum": 9,
+        "direction": "SB",
+        "volume": 605
+      }
+    ],
+    "linkConservationAM": [
+      {
+        "fromNum": 1,
+        "toNum": 2,
+        "direction": "NB",
+        "upstream_outflow": 660,
+        "downstream_inflow": 660,
+        "delta": 0,
+        "mode": "Full"
+      },
+      {
+        "fromNum": 2,
+        "toNum": 1,
+        "direction": "SB",
+        "upstream_outflow": 670,
+        "downstream_inflow": 670,
+        "delta": 0,
+        "mode": "Full"
+      },
+      {
+        "fromNum": 2,
+        "toNum": 3,
+        "direction": "NB",
+        "upstream_outflow": 655,
+        "downstream_inflow": 655,
+        "delta": 0,
+        "mode": "Full"
+      },
+      {
+        "fromNum": 3,
+        "toNum": 2,
+        "direction": "SB",
+        "upstream_outflow": 660,
+        "downstream_inflow": 660,
+        "delta": 0,
+        "mode": "Full"
+      },
+      {
+        "fromNum": 3,
+        "toNum": 4,
+        "direction": "NB",
+        "upstream_outflow": 685,
+        "downstream_inflow": 675,
+        "delta": -10,
+        "mode": "Full"
+      },
+      {
+        "fromNum": 4,
+        "toNum": 3,
+        "direction": "SB",
+        "upstream_outflow": 615,
+        "downstream_inflow": 635,
+        "delta": 20,
+        "mode": "Full"
+      },
+      {
+        "fromNum": 4,
+        "toNum": 5,
+        "direction": "NB",
+        "upstream_outflow": 495,
+        "downstream_inflow": 480,
+        "delta": -15,
+        "mode": "Full"
+      },
+      {
+        "fromNum": 5,
+        "toNum": 4,
+        "direction": "SB",
+        "upstream_outflow": 445,
+        "downstream_inflow": 465,
+        "delta": 20,
+        "mode": "Full"
+      },
+      {
+        "fromNum": 5,
+        "toNum": 6,
+        "direction": "NB",
+        "upstream_outflow": 685,
+        "downstream_inflow": 685,
+        "delta": 0,
+        "mode": "Full"
+      },
+      {
+        "fromNum": 6,
+        "toNum": 5,
+        "direction": "SB",
+        "upstream_outflow": 635,
+        "downstream_inflow": 635,
+        "delta": 0,
+        "mode": "Full"
+      },
+      {
+        "fromNum": 6,
+        "toNum": 7,
+        "direction": "NB",
+        "upstream_outflow": 465,
+        "downstream_inflow": 465,
+        "delta": 0,
+        "mode": "Full"
+      },
+      {
+        "fromNum": 7,
+        "toNum": 6,
+        "direction": "SB",
+        "upstream_outflow": 430,
+        "downstream_inflow": 430,
+        "delta": 0,
+        "mode": "Full"
+      },
+      {
+        "fromNum": 7,
+        "toNum": 8,
+        "direction": "NB",
+        "upstream_outflow": 455,
+        "downstream_inflow": 455,
+        "delta": 0,
+        "mode": "Full"
+      },
+      {
+        "fromNum": 8,
+        "toNum": 7,
+        "direction": "SB",
+        "upstream_outflow": 400,
+        "downstream_inflow": 400,
+        "delta": 0,
+        "mode": "Full"
+      },
+      {
+        "fromNum": 8,
+        "toNum": 9,
+        "direction": "NB",
+        "upstream_outflow": 630,
+        "downstream_inflow": 630,
+        "delta": 0,
+        "mode": "Full"
+      },
+      {
+        "fromNum": 9,
+        "toNum": 8,
+        "direction": "SB",
+        "upstream_outflow": 470,
+        "downstream_inflow": 470,
+        "delta": 0,
+        "mode": "Full"
+      },
+      {
+        "fromNum": 9,
+        "toNum": 10,
+        "direction": "NB",
+        "upstream_outflow": 600,
+        "downstream_inflow": 600,
+        "delta": 0,
+        "mode": "Full"
+      },
+      {
+        "fromNum": 10,
+        "toNum": 9,
+        "direction": "SB",
+        "upstream_outflow": 505,
+        "downstream_inflow": 505,
+        "delta": 0,
+        "mode": "Full"
+      }
+    ],
+    "linkConservationPM": [
+      {
+        "fromNum": 1,
+        "toNum": 2,
+        "direction": "NB",
+        "upstream_outflow": 785,
+        "downstream_inflow": 785,
+        "delta": 0,
+        "mode": "Full"
+      },
+      {
+        "fromNum": 2,
+        "toNum": 1,
+        "direction": "SB",
+        "upstream_outflow": 815,
+        "downstream_inflow": 815,
+        "delta": 0,
+        "mode": "Full"
+      },
+      {
+        "fromNum": 2,
+        "toNum": 3,
+        "direction": "NB",
+        "upstream_outflow": 765,
+        "downstream_inflow": 765,
+        "delta": 0,
+        "mode": "Full"
+      },
+      {
+        "fromNum": 3,
+        "toNum": 2,
+        "direction": "SB",
+        "upstream_outflow": 800,
+        "downstream_inflow": 800,
+        "delta": 0,
+        "mode": "Full"
+      },
+      {
+        "fromNum": 3,
+        "toNum": 4,
+        "direction": "NB",
+        "upstream_outflow": 835,
+        "downstream_inflow": 815,
+        "delta": -20,
+        "mode": "Full"
+      },
+      {
+        "fromNum": 4,
+        "toNum": 3,
+        "direction": "SB",
+        "upstream_outflow": 740,
+        "downstream_inflow": 760,
+        "delta": 20,
+        "mode": "Full"
+      },
+      {
+        "fromNum": 4,
+        "toNum": 5,
+        "direction": "NB",
+        "upstream_outflow": 600,
+        "downstream_inflow": 575,
+        "delta": -25,
+        "mode": "Full"
+      },
+      {
+        "fromNum": 5,
+        "toNum": 4,
+        "direction": "SB",
+        "upstream_outflow": 535,
+        "downstream_inflow": 560,
+        "delta": 25,
+        "mode": "Full"
+      },
+      {
+        "fromNum": 5,
+        "toNum": 6,
+        "direction": "NB",
+        "upstream_outflow": 835,
+        "downstream_inflow": 835,
+        "delta": 0,
+        "mode": "Full"
+      },
+      {
+        "fromNum": 6,
+        "toNum": 5,
+        "direction": "SB",
+        "upstream_outflow": 760,
+        "downstream_inflow": 760,
+        "delta": 0,
+        "mode": "Full"
+      },
+      {
+        "fromNum": 6,
+        "toNum": 7,
+        "direction": "NB",
+        "upstream_outflow": 555,
+        "downstream_inflow": 555,
+        "delta": 0,
+        "mode": "Full"
+      },
+      {
+        "fromNum": 7,
+        "toNum": 6,
+        "direction": "SB",
+        "upstream_outflow": 520,
+        "downstream_inflow": 520,
+        "delta": 0,
+        "mode": "Full"
+      },
+      {
+        "fromNum": 7,
+        "toNum": 8,
+        "direction": "NB",
+        "upstream_outflow": 545,
+        "downstream_inflow": 545,
+        "delta": 0,
+        "mode": "Full"
+      },
+      {
+        "fromNum": 8,
+        "toNum": 7,
+        "direction": "SB",
+        "upstream_outflow": 485,
+        "downstream_inflow": 485,
+        "delta": 0,
+        "mode": "Full"
+      },
+      {
+        "fromNum": 8,
+        "toNum": 9,
+        "direction": "NB",
+        "upstream_outflow": 745,
+        "downstream_inflow": 745,
+        "delta": 0,
+        "mode": "Full"
+      },
+      {
+        "fromNum": 9,
+        "toNum": 8,
+        "direction": "SB",
+        "upstream_outflow": 565,
+        "downstream_inflow": 565,
+        "delta": 0,
+        "mode": "Full"
+      },
+      {
+        "fromNum": 9,
+        "toNum": 10,
+        "direction": "NB",
+        "upstream_outflow": 710,
+        "downstream_inflow": 710,
+        "delta": 0,
+        "mode": "Full"
+      },
+      {
+        "fromNum": 10,
+        "toNum": 9,
+        "direction": "SB",
+        "upstream_outflow": 620,
+        "downstream_inflow": 620,
+        "delta": 0,
+        "mode": "Full"
+      }
+    ],
+    "qcFlags": [
+      {
+        "check": "GEOMETRY-FALLBACK",
+        "period": null,
+        "fromNum": 4,
+        "toNum": 5,
+        "message": "Directional fallback used at Int 4↔5 — verify leg orientation."
+      },
+      {
+        "check": "NCHRP-LINK-DELTA",
+        "int": 3,
+        "message": "Link 3→4 NB (Full): delta -10.0 veh post-reconciliation — upstream 685, downstream 675. Likely a raw-floor clipping issue on one of the leg's L/T/R cells.",
+        "period": "AM"
+      },
+      {
+        "check": "NCHRP-LINK-DELTA",
+        "int": 4,
+        "message": "Link 4→3 SB (Full): delta +20.0 veh post-reconciliation — upstream 615, downstream 635. Likely a raw-floor clipping issue on one of the leg's L/T/R cells.",
+        "period": "AM"
+      },
+      {
+        "check": "NCHRP-LINK-DELTA",
+        "int": 4,
+        "message": "Link 4→5 NB (Full): delta -15.0 veh post-reconciliation — upstream 495, downstream 480. Likely a raw-floor clipping issue on one of the leg's L/T/R cells.",
+        "period": "AM"
+      },
+      {
+        "check": "NCHRP-LINK-DELTA",
+        "int": 5,
+        "message": "Link 5→4 SB (Full): delta +20.0 veh post-reconciliation — upstream 445, downstream 465. Likely a raw-floor clipping issue on one of the leg's L/T/R cells.",
+        "period": "AM"
+      },
+      {
+        "check": "NCHRP-LINK-DELTA",
+        "int": 3,
+        "message": "Link 3→4 NB (Full): delta -20.0 veh post-reconciliation — upstream 835, downstream 815. Likely a raw-floor clipping issue on one of the leg's L/T/R cells.",
+        "period": "PM"
+      },
+      {
+        "check": "NCHRP-LINK-DELTA",
+        "int": 4,
+        "message": "Link 4→3 SB (Full): delta +20.0 veh post-reconciliation — upstream 740, downstream 760. Likely a raw-floor clipping issue on one of the leg's L/T/R cells.",
+        "period": "PM"
+      },
+      {
+        "check": "NCHRP-LINK-DELTA",
+        "int": 4,
+        "message": "Link 4→5 NB (Full): delta -25.0 veh post-reconciliation — upstream 600, downstream 575. Likely a raw-floor clipping issue on one of the leg's L/T/R cells.",
+        "period": "PM"
+      },
+      {
+        "check": "NCHRP-LINK-DELTA",
+        "int": 5,
+        "message": "Link 5→4 SB (Full): delta +25.0 veh post-reconciliation — upstream 535, downstream 560. Likely a raw-floor clipping issue on one of the leg's L/T/R cells.",
+        "period": "PM"
+      }
+    ],
+    "movementsReviewAM_count": 41,
+    "movementsReviewPM_count": 46,
+    "largestDropAM": [
+      {
+        "int_num": 6,
+        "movement": "EBT",
+        "raw": 130,
+        "balanced": 35,
+        "delta": -95
+      },
+      {
+        "int_num": 6,
+        "movement": "WBT",
+        "raw": 125,
+        "balanced": 35,
+        "delta": -90
+      },
+      {
+        "int_num": 5,
+        "movement": "EBT",
+        "raw": 145,
+        "balanced": 85,
+        "delta": -60
+      },
+      {
+        "int_num": 5,
+        "movement": "WBT",
+        "raw": 140,
+        "balanced": 95,
+        "delta": -45
+      },
+      {
+        "int_num": 4,
+        "movement": "EBT",
+        "raw": 180,
+        "balanced": 140,
+        "delta": -40
+      }
+    ],
+    "largestDropPM": [
+      {
+        "int_num": 6,
+        "movement": "EBT",
+        "raw": 175,
+        "balanced": 95,
+        "delta": -80
+      },
+      {
+        "int_num": 5,
+        "movement": "EBT",
+        "raw": 195,
+        "balanced": 120,
+        "delta": -75
+      },
+      {
+        "int_num": 6,
+        "movement": "WBT",
+        "raw": 170,
+        "balanced": 95,
+        "delta": -75
+      },
+      {
+        "int_num": 5,
+        "movement": "WBT",
+        "raw": 190,
+        "balanced": 135,
+        "delta": -55
+      },
+      {
+        "int_num": 4,
+        "movement": "EBT",
+        "raw": 230,
+        "balanced": 185,
+        "delta": -45
+      }
+    ]
+  },
+  "deliverable": {
+    "sheetNames": [
+      "Provenance",
+      "Combined View",
+      "Raw Movements"
+    ],
+    "excelBytes": 19210,
+    "diagramAMBytes": 291463,
+    "diagramPMBytes": 290644,
+    "downloads": [
+      "alpine-tavern-rd-corridor-v1-smoke.xlsx",
+      "alpine-tavern-rd-corridor-v1-smoke_line_diagram_am.png",
+      "alpine-tavern-rd-corridor-v1-smoke_line_diagram_pm.png"
+    ],
+    "provenanceFirstStrings": []
+  }
+}
