@@ -177,6 +177,30 @@ await page.waitForTimeout(150)
 expect('Gate: Continue re-enabled once an approach is selected',
   (await continueBtn.isDisabled()) === false)
 
+// ── Diagonal / unknown corridor: smart default can't fire → hint must show ───
+// On an NE/SW corridor crossStreetDirs() returns null, so Two-way stop has no
+// cross-street default and starts empty — exactly the case the cardinal smart
+// default doesn't cover. The zero-selected hint is the guard against a silent
+// stop-less diagram.
+await page.goto(BASE, { waitUntil: 'domcontentloaded' })
+await page.evaluate((k) => {
+  const proj = JSON.parse(localStorage.getItem(k))
+  proj.balancing = { corridorDir: 'NE/SW' }           // diagonal → no smart default
+  proj.analysis = { corridorDir: null, lastRun: null }
+  localStorage.setItem(k, JSON.stringify(proj))
+}, KEY)
+await page.goto(`${BASE}/map`, { waitUntil: 'networkidle' })
+await page.locator('.di-int__body').first().click()
+await page.waitForSelector('.di-seg', { timeout: 4000 })
+await clickControl('Two-way stop')
+{
+  const ap = await readApproaches()
+  expect('Diagonal corridor: Two-way smart default leaves 0 selected', stoppedDirs(ap).length === 0)
+  const hint = await page.locator('.di-stopleg__hint').textContent().catch(() => '')
+  expect('Diagonal corridor: zero-selected hint shows (no silent empty)',
+    (await page.locator('.di-stopleg__hint').count()) === 1 && /no stop signs/i.test(hint || ''))
+}
+
 await page.screenshot({ path: '/tmp/stop_control_inspector.png' })
 await b.close()
 
