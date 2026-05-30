@@ -3,6 +3,14 @@
 **Date:** 2026-05-29
 **Context:** v1 build from `/product-kickoff` DECISION (Night Traffic dark default + Sunshine light, Voyager / Positron map tiles, S1 modal picker).
 
+> **Status (2026-05-29):** ✅ COMPLETE — all phases shipped on `main`.
+> Phase 2 `80f6119`/`fad1e70` · Phase 3 `87efbd0` · Phase 3.5 `e631000`
+> (S7 card body) · Phase 4 `5c84597` (Voyager/Positron tiles + export-restore
+> fix) · Phase 5 `c13b077` (S1 picker + boot apply) · Phase 6 `7f560a2`
+> (headless verification, 12/12 green in both themes). Pure helpers covered by
+> `themeTiles.test.mjs` + `theme.test.mjs`. Deferred items below under
+> "Audit queue" (#4–#7) remain open.
+
 ## Big finding: theming infrastructure already exists
 
 The codebase has **674 `var(--…)` usages** across `frontend/src/styles/*.css` and a `:root` block in `frontend/src/index.css` already defines the chrome variables:
