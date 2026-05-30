@@ -71,6 +71,10 @@ export default function S5_BalancingSettings() {
   }, [needsVolumes, navigate])
 
   const [advancedOpen, setAdvancedOpen] = useState(false)
+  // Modal toggles must be declared before the needsVolumes early return below —
+  // a hook after a conditional return changes the hook count between renders
+  // (rules-of-hooks crash when needsVolumes flips).
+  const [linkInfoOpen, setLinkInfoOpen] = useState(false)
 
   if (needsVolumes) {
     return (
@@ -89,8 +93,7 @@ export default function S5_BalancingSettings() {
   const linkResolution = balancing.linkResolution ?? 'larger'
   const corrDir        = balancing.corridorDir ?? 'EB/WB'
 
-  // Info modal for link-disagreement explanation
-  const [linkInfoOpen, setLinkInfoOpen] = useState(false)
+  // (linkInfoOpen hoisted above the early return — see note there.)
   const peakMode   = balancing.peakMode ?? 'Corridor'
   const am         = balancing.amWindow ?? { start: '07:00', end: '09:00' }
   const pm         = balancing.pmWindow ?? { start: '16:00', end: '18:00' }
