@@ -208,6 +208,19 @@ def _dg_lane_positions(ap, qcx, qcy, sp):
     return []
 
 
+def _stop_legs(geo):
+    """Legs that get a stop sign — the per-approach `stopped_approaches` list set
+    in the S2 Inspector, restricted to active legs so a stale flag can't draw a
+    stop on a non-existent approach. Placement is per-approach now; it is NOT
+    derived from control type (the frontend resolves control -> flags -> this
+    list). Extracted as a pure helper so the placement is unit-testable."""
+    stopped = geo.get('stopped_approaches') or []
+    active = geo.get('active_legs')
+    if active is None:
+        return list(stopped)
+    return [ap for ap in stopped if ap in active]
+
+
 def _dg_stop_sign(ax, ap, cx, cy):
     """Stop sign with bar facing approaching traffic. Position 0.06 from center."""
     r = 0.016; sl = 0.030; sk = 0.020; off = 0.038; pos = 0.06; lw_s = 1.3
@@ -383,7 +396,7 @@ def _dg_draw_cell(ax, geo, u_vols, b_vols, p, label_fn, overrides=None, period_l
                      edgecolor=DG_BLACK, lw=0.5, zorder=7))
     else:
         ax.plot(cx, cy, 'k.', markersize=4, zorder=6)
-        for ap in geo.get('stopped_approaches', []):
+        for ap in _stop_legs(geo):
             _dg_stop_sign(ax, ap, cx, cy)
 
     # Street labels — wrap on ' / ' and auto-shrink long names so they stay

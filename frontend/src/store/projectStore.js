@@ -146,6 +146,7 @@ export function reconcileDependents(state) {
     removedLinkModes: 0,
     removedOverrides: 0,
     clearedLastRun: false,
+    normalizedApproaches: 0,
   }
   if (!state || typeof state !== 'object') return { state, summary, changed: false }
 
@@ -215,6 +216,40 @@ export function reconcileDependents(state) {
     summary.clearedLastRun = true
   }
 
+  // 5. Normalize approach shape. The removed `stopped_approaches` array (stop
+  // legs were derived from control type) is dropped, and every approach is
+  // guaranteed a boolean `stopControlled` (default false). Stop placement is
+  // now per-approach, so the array can't drift from approach existence.
+  // Values aren't migrated from the old array — it never held real data.
+  let normalized = 0
+  const normInts = intersections.map((it) => {
+    if (!it || typeof it !== 'object') return it
+    const hadArray = 'stopped_approaches' in it
+    let approachesChanged = false
+    let nextApproaches = it.approaches
+    if (it.approaches && typeof it.approaches === 'object') {
+      nextApproaches = {}
+      for (const [dir, ap] of Object.entries(it.approaches)) {
+        if (ap && typeof ap === 'object' && typeof ap.stopControlled !== 'boolean') {
+          nextApproaches[dir] = { ...ap, stopControlled: false }
+          approachesChanged = true
+        } else {
+          nextApproaches[dir] = ap
+        }
+      }
+    }
+    if (!hadArray && !approachesChanged) return it
+    normalized++
+    const copy = { ...it }
+    if (hadArray) delete copy.stopped_approaches
+    if (approachesChanged) copy.approaches = nextApproaches
+    return copy
+  })
+  if (normalized > 0) {
+    summary.normalizedApproaches = normalized
+    next = { ...next, intersections: normInts }
+  }
+
   return { state: next, summary, changed: next !== state }
 }
 
@@ -227,6 +262,7 @@ export function summarizeReconcile(summary) {
   if (summary.removedLinkModes) parts.push(`removed ${summary.removedLinkModes} stale link balance mode${plural(summary.removedLinkModes)}`)
   if (summary.removedOverrides) parts.push(`removed ${summary.removedOverrides} orphan override${plural(summary.removedOverrides)}`)
   if (summary.clearedLastRun) parts.push('cleared lastRun')
+  if (summary.normalizedApproaches) parts.push(`normalized approaches on ${summary.normalizedApproaches} intersection${plural(summary.normalizedApproaches)}`)
   return parts.join(', ')
 }
 
@@ -469,6 +505,20 @@ export function setCorridorDir(dir) {
 }
 
 // ── S3 approach configuration ─────────────────────────────────────────────────
+// Canonical approach shape. `exists` gates whether the leg is present, `lanes`
+// holds its movement config, and `stopControlled` flags it as stop-sign-
+// controlled — which drives stop-bar placement in the line diagram (see
+// lib/diagramPayload.stoppedApproaches). One shape shared by S2 (seed at pin
+// creation), S3 (default-fill), and the self-heal pass, so they can't drift.
+export const defaultApproach = () => ({ exists: true, lanes: [{ movement: 'T' }], stopControlled: false })
+
+export const defaultApproaches = () => ({
+  EB: defaultApproach(),
+  WB: defaultApproach(),
+  NB: defaultApproach(),
+  SB: defaultApproach(),
+})
+
 export function getApproaches(intersectionId) {
   const it = getIntersections().find((x) => x.id === intersectionId)
   return it?.approaches ?? null

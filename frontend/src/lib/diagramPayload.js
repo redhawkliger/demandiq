@@ -26,14 +26,15 @@ export function parseStreets(intersection) {
   return { EW: first, NS: second }
 }
 
+// Stop bars are placed per-approach now: an approach is stop-controlled iff its
+// `stopControlled` flag is set (engineer-toggled in the S2 Inspector). This drops
+// the old control-type derivation (which mis-placed bars for Two-way / Side-
+// street / One-way stops). The backend renderer draws a stop sign at each leg
+// returned here — unchanged. `legs` are the active legs, so only existing
+// approaches can be returned.
 export function stoppedApproaches(intersection, legs) {
-  const c = intersection.control
-  if (c === 'All-way stop') return legs
-  if (c === 'Two-way stop') {
-    const minor = intersection.mainDir === 'NB/SB' ? ['EB', 'WB'] : ['NB', 'SB']
-    return legs.filter((d) => minor.includes(d))
-  }
-  return []
+  const approaches = intersection.approaches || {}
+  return legs.filter((d) => approaches[d]?.stopControlled === true)
 }
 
 export function intersectionGeo(intersection) {

@@ -232,5 +232,41 @@ pushHistory()
 setIntersections([...getSnapshot().intersections, { id: 'i9', num: 3, name: 'Z', control: 'Signalized', legs: '4-leg', mainDir: 'EB/WB', crossDir: 'NB/SB' }])
 ok(!canRedo(), 'history: new action clears the redo stack')
 
+// ── Approach normalization (stop-controlled migration) ───────────────────────
+// reconcileDependents drops the removed `stopped_approaches` array and ensures
+// every approach carries a boolean `stopControlled`. Values are NOT migrated —
+// the old array was dev-only and never held real data.
+{
+  const fixture = {
+    intersections: [
+      {
+        id: 'i1', num: 1, name: 'A', control: 'Two-way stop',
+        stopped_approaches: ['NB', 'SB'],            // stale array → must be dropped
+        approaches: {
+          EB: { exists: true, lanes: [{ movement: 'T' }] },   // no stopControlled
+          WB: { exists: true, lanes: [{ movement: 'T' }] },
+          NB: { exists: true, lanes: [{ movement: 'T' }] },
+          SB: { exists: false },
+        },
+      },
+    ],
+  }
+  const { state, summary, changed } = reconcileDependents(fixture)
+  const it = state.intersections[0]
+  ok(changed === true, 'normalize: reconcile reports changed')
+  ok(!('stopped_approaches' in it), 'normalize: stale stopped_approaches array dropped')
+  ok(['EB', 'WB', 'NB', 'SB'].every((d) => typeof it.approaches[d].stopControlled === 'boolean'),
+    'normalize: every approach has a boolean stopControlled')
+  ok(['EB', 'WB', 'NB', 'SB'].every((d) => it.approaches[d].stopControlled === false),
+    'normalize: values default to false (no migration from the old array)')
+  ok(it.approaches.EB.lanes.length === 1 && it.approaches.SB.exists === false,
+    'normalize: existing approach fields (lanes, exists) are preserved')
+  ok(summary.normalizedApproaches === 1, 'normalize: summary counts 1 intersection touched')
+
+  // Idempotent: a second pass over already-normalized state changes nothing.
+  const again = reconcileDependents(state)
+  ok(again.changed === false, 'normalize: idempotent — already-clean state is unchanged')
+}
+
 console.log(`\n${'='.repeat(46)}\n  ${passed} passed, ${failed} failed`)
 process.exit(failed === 0 ? 0 : 1)

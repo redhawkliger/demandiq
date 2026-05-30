@@ -13,6 +13,7 @@ TESTS=(
   test_balancer_nchrp
   test_excel_overrides
   test_line_diagram_annotation
+  test_line_diagram
   test_e2e_bodger
 )
 

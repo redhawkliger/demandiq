@@ -27,7 +27,9 @@ from balancer import balance_nchrp
 from line_diagram import (
     render_corridor_diagram,
     render_diagram_grid,
+    render_single_diagram,
     _segment_label_for_pair,
+    _stop_legs,
     collect_wrap_segment_labels,
     FIG_INCHES,
     DPI,
@@ -250,8 +252,46 @@ def test_empty_resolved_links_renders_cleanly():
     print(f"  4. EMPTY LINKS: PASS (renders {len(png)}b PNG, no crash)")
 
 
+# ── Stop-sign placement (per-approach stopControlled) ────────────────────────
+def test_stop_legs_placement():
+    active = ['EB', 'WB', 'NB', 'SB']
+    # Two-way stop: only the cross-street legs are flagged (the frontend resolves
+    # control -> flags -> this array). EB/WB must NOT get a stop.
+    assert _stop_legs({'active_legs': active, 'stopped_approaches': ['NB', 'SB']}) == ['NB', 'SB']
+    # All-way stop: every active leg.
+    assert sorted(_stop_legs({'active_legs': active,
+                              'stopped_approaches': ['EB', 'WB', 'NB', 'SB']})) == sorted(active)
+    # Signalized / any non-stop control: the frontend sends an empty array.
+    assert _stop_legs({'active_legs': active, 'stopped_approaches': []}) == []
+    # Side-street stop resolves to the same cross-street placement as two-way.
+    assert _stop_legs({'active_legs': active, 'stopped_approaches': ['NB', 'SB']}) == ['NB', 'SB']
+    # Hardening: a stale flag on a non-active leg is dropped — no stop on a leg
+    # that doesn't exist (T-intersection has no WB approach).
+    assert _stop_legs({'active_legs': ['EB', 'NB', 'SB'],
+                       'stopped_approaches': ['NB', 'SB', 'WB']}) == ['NB', 'SB']
+    print("  STOP LEGS: PASS (cross-street for two-way, all for all-way, none for signal, non-active dropped)")
+
+
+def test_render_draws_stops_without_crash():
+    # Every other render test uses stopped_approaches=[], so the _dg_stop_sign
+    # path was never exercised. Render a Two-way (cross-street stops) and an
+    # All-way (all legs) and assert valid PNGs.
+    U = {'EBT': 300, 'WBT': 280, 'NBT': 130, 'SBT': 120}
+    B = {'EBT': 305, 'WBT': 285, 'NBT': 135, 'SBT': 125}
+    base = {'num': 1, 'name': 'Main & Cross', 'active_legs': ['EB', 'WB', 'NB', 'SB'],
+            'streets': {'NS': 'Cross', 'EW': 'Main'}}
+    twoway = {**base, 'control': 'Two-way stop', 'stopped_approaches': ['NB', 'SB']}
+    allway = {**base, 'control': 'All-way stop', 'stopped_approaches': ['EB', 'WB', 'NB', 'SB']}
+    for geo, tag in [(twoway, 'two-way'), (allway, 'all-way')]:
+        png = render_single_diagram(geo, U, B, 'combined')
+        assert png[:4] == b'\x89PNG' and len(png) > 1000, f"{tag}: invalid/small PNG ({len(png)}b)"
+    print("  STOP RENDER: PASS (two-way + all-way stop signs render valid PNGs)")
+
+
 if __name__ == '__main__':
     tests = [
+        test_stop_legs_placement,
+        test_render_draws_stops_without_crash,
         test_renders_png_both_periods,
         test_segment_label_count_matches_corridor_links,
         test_per_cell_rendering_byte_identical_when_no_segments,

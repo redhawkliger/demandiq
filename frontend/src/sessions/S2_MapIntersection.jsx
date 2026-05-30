@@ -21,6 +21,7 @@ import {
   redo,
   canUndo,
   canRedo,
+  defaultApproaches,
 } from '../store/projectStore'
 import { reverseGeocode } from '../lib/photon'
 import {
@@ -30,13 +31,19 @@ import {
   sortAlongCorridor,
   suggestDirection,
 } from '../lib/geo'
+import {
+  approachesForControl,
+  STOP_CONTROL_TYPES,
+  AUTO_FILL_TYPES,
+  ACTIVE_DIRS,
+} from '../lib/stopControl'
 
 const PERPENDICULAR = {
   'EB/WB': 'NB/SB', 'NB/SB': 'EB/WB',
   'NE/SW': 'NW/SE', 'NW/SE': 'NE/SW',
 }
 const DIRS = ['EB/WB', 'NB/SB', 'NE/SW', 'NW/SE']
-const CONTROLS = ['Signalized', 'Two-way stop', 'All-way stop', 'Roundabout']
+const CONTROLS = ['Signalized', 'Two-way stop', 'Side-street stop', 'One-way stop', 'All-way stop', 'Roundabout']
 const LEGS = ['3-leg', '4-leg']
 
 const newId = () =>
@@ -60,6 +67,9 @@ export default function S2_MapIntersection() {
   const snap = useSyncExternalStore(subscribe, getSnapshot, () => ({}))
   const intersections = snap.intersections || []
   const links = snap.links || []
+  // Corridor direction drives the smart stop-leg default. Prefer the balancing
+  // long form ('EB/WB' | 'NB/SB'), fall back to the analysis short form.
+  const corridorDir = snap.balancing?.corridorDir ?? snap.analysis?.corridorDir ?? null
   const undoable = canUndo()
   const redoable = canRedo()
 
@@ -92,9 +102,15 @@ export default function S2_MapIntersection() {
   // ── Mutations (each snapshots history BEFORE committing) ───────────────
   const addIntersection = (lat, lng, form) => {
     pushHistory()
+    // Seed the canonical approach shape at creation so the Inspector's stop-leg
+    // checkboxes have something to bind to (S3 still default-fills any older pin
+    // that lacks approaches). All four legs exist by default; S3 toggles exists.
+    // Apply the stop-control rules for the chosen control up front, so a pin
+    // created directly as All-way / Two-way stop already carries correct flags.
+    const approaches = approachesForControl(defaultApproaches(), form.control, corridorDir)
     persistIntersections([
       ...intersections,
-      { id: newId(), num: intersections.length + 1, lat, lng, ...form },
+      { id: newId(), num: intersections.length + 1, lat, lng, ...form, approaches },
     ])
   }
 
@@ -393,6 +409,7 @@ export default function S2_MapIntersection() {
             link={selLink}
             intersections={intersections}
             connectFrom={connectFrom}
+            corridorDir={corridorDir}
             onUpdateIntersection={updateIntersection}
             onDeleteIntersection={deleteIntersectionById}
             onStartConnect={startConnect}
@@ -471,7 +488,7 @@ function AddPopover({ draft, onChange, onCommit, onCancel }) {
 
 // ── Unified right-side Inspector (pin OR link) ────────────────────────────
 function Inspector({
-  intersection, link, intersections, connectFrom,
+  intersection, link, intersections, connectFrom, corridorDir,
   onUpdateIntersection, onDeleteIntersection, onStartConnect,
   onDeleteLink, onResetProject,
 }) {
@@ -499,6 +516,34 @@ function Inspector({
 
   // intersection
   const armed = connectFrom === intersection.id
+
+  // Stop-control state for the selected intersection.
+  const control = intersection.control
+  const approaches = intersection.approaches || {}
+  const showStopRow = STOP_CONTROL_TYPES.has(control) || AUTO_FILL_TYPES.has(control)
+  const autoFillStops = AUTO_FILL_TYPES.has(control)
+  const stopDirs = ACTIVE_DIRS.filter((d) => approaches[d]?.exists === true)
+  const stoppedCount = stopDirs.filter((d) => approaches[d]?.stopControlled).length
+
+  // Changing control re-applies the per-control stop rules (AWS auto-fills,
+  // Two-way/Side-street smart-default to the cross street, others clear) in the
+  // SAME update as the control change so the diagram and checkboxes stay in sync.
+  const handleControlChange = (v) => {
+    const partial = { control: v }
+    if (intersection.approaches) {
+      partial.approaches = approachesForControl(intersection.approaches, v, corridorDir)
+    }
+    onUpdateIntersection(intersection.id, partial)
+  }
+
+  const toggleStop = (dir) => {
+    if (autoFillStops) return
+    const ap = approaches[dir]
+    onUpdateIntersection(intersection.id, {
+      approaches: { ...approaches, [dir]: { ...ap, stopControlled: !ap?.stopControlled } },
+    })
+  }
+
   return (
     <div className="di-inspector">
       <div className="di-inspector__head">Intersection {intersection.num}</div>
@@ -507,8 +552,35 @@ function Inspector({
         value={intersection.name || ''}
         onCommit={(name) => onUpdateIntersection(intersection.id, { name })}
       />
-      <Segmented label="Control" value={intersection.control} options={CONTROLS}
-        onSelect={(v) => onUpdateIntersection(intersection.id, { control: v })} />
+      <Segmented label="Control" value={control} options={CONTROLS}
+        onSelect={handleControlChange} />
+      {showStopRow && (
+        <div className="di-inspector__row di-inspector__row--stack">
+          <span className="di-inspector__sublabel">Stop-controlled approaches</span>
+          <div className="di-stopleg-grid">
+            {stopDirs.map((dir) => {
+              const checked = autoFillStops ? true : Boolean(approaches[dir]?.stopControlled)
+              return (
+                <label
+                  key={dir}
+                  className={`di-stopleg${checked ? ' di-stopleg--on' : ''}${autoFillStops ? ' di-stopleg--locked' : ''}`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    disabled={autoFillStops}
+                    onChange={() => toggleStop(dir)}
+                  />
+                  <span>{dir}</span>
+                </label>
+              )
+            })}
+          </div>
+          {control === 'Two-way stop' && stoppedCount !== 2 && (
+            <span className="di-stopleg__hint">Two-way stop typically has 2 approaches controlled.</span>
+          )}
+        </div>
+      )}
       <Segmented label="Legs" value={intersection.legs} options={LEGS}
         onSelect={(v) => onUpdateIntersection(intersection.id, { legs: v })} />
       <label className="di-inspector__row">

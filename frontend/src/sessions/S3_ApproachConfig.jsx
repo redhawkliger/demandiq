@@ -7,6 +7,7 @@ import {
   getSnapshot,
   setApproaches,
   isIntersectionConfigured,
+  defaultApproaches,
 } from '../store/projectStore'
 import MovementSvg from '../components/MovementSvg'
 import MovementPickerModal from '../components/MovementPickerModal'
@@ -14,15 +15,6 @@ import MovementPickerModal from '../components/MovementPickerModal'
 import '../styles/forms.css'
 import '../styles/map.css'    // reuses .di-modal, .di-banner, .di-btn-secondary
 import '../styles/approach.css'
-
-const defaultApproach = () => ({ exists: true, lanes: [{ movement: 'T' }] })
-
-const defaultApproaches = () => ({
-  EB: defaultApproach(),
-  WB: defaultApproach(),
-  NB: defaultApproach(),
-  SB: defaultApproach(),
-})
 
 // Major / cross grouping per the project-wide corridor direction (set in S2).
 function groupedDirs(corridorDir) {
