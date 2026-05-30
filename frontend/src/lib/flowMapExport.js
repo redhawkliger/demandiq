@@ -10,8 +10,8 @@
 
 import html2canvas from 'html2canvas'
 import { IMBALANCE_COLORS } from './flowMap'
+import { tileUrlForTheme } from './themeTiles'
 
-const DARK_TILE_URL  = 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
 const LIGHT_TILE_URL = 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png'
 
 // Wait for all visible tile <img> elements in the container to fire `load`
@@ -88,7 +88,7 @@ function injectOverlays({ container, title, viewType, method, dateStr }) {
 }
 
 // Public: swap to light tiles, wait for them to load, capture at 2×,
-// restore dark tiles, trigger download. The TileLayer ref is passed in
+// restore the active theme's tiles, trigger download. The TileLayer ref is passed in
 // from MapView so we don't have to reach into Leaflet internals here.
 //
 // Args:
@@ -145,8 +145,11 @@ export async function exportFlowMapPNG({ tileLayer, container, meta }) {
       }, 'image/png')
     })
   } finally {
-    // 5. Always restore dark tiles + remove overlays
+    // 5. Always restore the live map's theme tiles + remove overlays.
+    // Restore to whatever the active palette wants (Voyager / Positron), NOT a
+    // hardcoded dark template — otherwise exporting on Sunshine would leave the
+    // live map showing dark tiles until the next theme change.
     removeOverlays()
-    tileLayer.setUrl(DARK_TILE_URL)
+    tileLayer.setUrl(tileUrlForTheme())
   }
 }

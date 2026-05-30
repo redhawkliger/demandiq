@@ -4,10 +4,7 @@ import L from 'leaflet'
 import { Search, X, Loader2 } from 'lucide-react'
 import { searchPhoton } from '../lib/photon'
 import { buildLinkFlows, fmtPair } from '../lib/flowMap'
-
-const TILE_URL = 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
-const TILE_ATTR =
-  '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
+import { TILE_ATTR, currentTheme, tileUrlForTheme } from '../lib/themeTiles'
 
 // Zoom thresholds for flow-label visibility (spec §6.7)
 const FLOW_LABEL_FADE_ZOOM = 13
@@ -503,6 +500,20 @@ export default function MapView({
   overrides = { AM: {}, PM: {} },
   onTileLayerReady,                  // (L.TileLayer) => void
 }) {
+  // Basemap follows the active palette. The S1 picker sets data-theme on the
+  // documentElement; a MutationObserver mirrors that into React state so the
+  // TileLayer's url prop changes — react-leaflet calls setUrl() on the SAME
+  // layer instance (no remove/add, no page reload), which keeps the instance
+  // reference S7 hands to the PNG exporter valid across theme switches.
+  const [theme, setTheme] = useState(currentTheme)
+  useEffect(() => {
+    const root = document.documentElement
+    const obs = new MutationObserver(() => setTheme(currentTheme()))
+    obs.observe(root, { attributes: true, attributeFilter: ['data-theme'] })
+    return () => obs.disconnect()
+  }, [])
+  const tileUrl = tileUrlForTheme(theme)
+
   return (
     <MapContainer
       center={[39, -96]}
@@ -513,7 +524,7 @@ export default function MapView({
       style={{ width: '100%', height: '100%' }}
     >
       <TileLayer
-        url={TILE_URL}
+        url={tileUrl}
         attribution={TILE_ATTR}
         subdomains={['a', 'b', 'c', 'd']}
         crossOrigin="anonymous"
