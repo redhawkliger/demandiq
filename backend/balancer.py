@@ -1,7 +1,8 @@
 """
 DemandIQ — balancing engine.
 
-Extracted from 3_demand_analysis.py and cleaned for use as a web-API module.
+Extracted from the original WSP demand-analysis tool (since removed) and
+cleaned for use as a web-API module.
 
 Cleanups vs original:
 - print() statements removed; functions return data, callers decide what to log.

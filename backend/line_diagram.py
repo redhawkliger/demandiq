@@ -1,9 +1,10 @@
 """
 DemandIQ — single-intersection line diagram renderer.
 
-Extracted from 3_demand_analysis.py (the v26-approved line diagram engine).
-Geometry, colours, cluster positions, font sizes, and arrow shapes are all
-locked from the original — DO NOT redesign. Only changes vs the original:
+Extracted from the original WSP demand-analysis tool (the v26-approved line
+diagram engine; that monolith has since been removed). Geometry, colours,
+cluster positions, font sizes, and arrow shapes are all locked from the
+original — DO NOT redesign. Only changes vs the original:
 
   - Module is self-contained: matplotlib.use('Agg') configured here, not
     inherited from the script's top-level.
