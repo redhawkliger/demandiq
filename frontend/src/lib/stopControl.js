@@ -76,3 +76,21 @@ export function stopHint(control, stoppedCount) {
   }
   return null
 }
+
+// Corridor-wide gate input: stop controls (Two-way / Side-street / One-way) with
+// ZERO active approaches selected would render a stop-less diagram — a wrong
+// deliverable. Returns the offending intersections ({id, num, control}) so S2 can
+// hard-block "Continue" until they're resolved. All-way (auto-filled) and
+// non-stop controls are never incomplete. A flag on a non-existent leg doesn't
+// count — the approach must both exist and be stop-controlled.
+export function incompleteStopControls(intersections) {
+  if (!Array.isArray(intersections)) return []
+  return intersections
+    .filter((it) => {
+      if (!STOP_CONTROL_TYPES.has(it?.control)) return false
+      const ap = it.approaches || {}
+      const hasStop = ACTIVE_DIRS.some((d) => ap[d]?.exists === true && ap[d]?.stopControlled === true)
+      return !hasStop
+    })
+    .map((it) => ({ id: it.id, num: it.num, control: it.control }))
+}

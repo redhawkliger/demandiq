@@ -1,3 +1,4 @@
+import { Fragment } from 'react'
 import { Trash2, MapPin, GripVertical } from 'lucide-react'
 import {
   DndContext,
@@ -24,6 +25,7 @@ export default function IntersectionList({
   onReorder,
   onContinue,
   canContinue,
+  stopBlockers = [],
   inspector,
 }) {
   const sensors = useSensors(
@@ -83,9 +85,23 @@ export default function IntersectionList({
       {inspector}
 
       <div className="di-side__footer">
-        {!canContinue && (
+        {intersections.length < 2 ? (
           <div className="di-side__hint">Confirm at least 2 intersections</div>
-        )}
+        ) : stopBlockers.length > 0 ? (
+          <div className="di-side__hint di-side__hint--block">
+            Select stop-controlled approaches:{' '}
+            {stopBlockers.map((b, i) => (
+              <Fragment key={b.id}>
+                {i > 0 && ', '}
+                <button
+                  type="button"
+                  className="di-side__hint-link"
+                  onClick={() => onSelect(b.id)}
+                >Int {b.num}</button>
+              </Fragment>
+            ))}
+          </div>
+        ) : null}
         <button
           type="button"
           className="di-btn-primary di-btn-primary--block"

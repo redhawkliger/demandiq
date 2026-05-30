@@ -34,6 +34,7 @@ import {
 import {
   approachesForControl,
   stopHint,
+  incompleteStopControls,
   STOP_CONTROL_TYPES,
   AUTO_FILL_TYPES,
   ACTIVE_DIRS,
@@ -71,6 +72,9 @@ export default function S2_MapIntersection() {
   // Corridor direction drives the smart stop-leg default. Prefer the balancing
   // long form ('EB/WB' | 'NB/SB'), fall back to the analysis short form.
   const corridorDir = snap.balancing?.corridorDir ?? snap.analysis?.corridorDir ?? null
+  // Hard gate: a stop control with zero approaches selected would ship a stop-
+  // less diagram. Block Continue until every stop control has at least one.
+  const stopBlockers = incompleteStopControls(intersections)
   const undoable = canUndo()
   const redoable = canRedo()
 
@@ -261,6 +265,7 @@ export default function S2_MapIntersection() {
   }
 
   const handleContinue = () => {
+    if (intersections.length < 2 || stopBlockers.length > 0) return // gated; see footer
     const dir = detectCorridorDir(intersections)
     const sorted = sortAlongCorridor(intersections, dir).map((it, i) => ({ ...it, num: i + 1 }))
     pushHistory()
@@ -403,7 +408,8 @@ export default function S2_MapIntersection() {
         onRemove={handleRemoveByIndex}
         onReorder={handleReorder}
         onContinue={handleContinue}
-        canContinue={intersections.length >= 2}
+        canContinue={intersections.length >= 2 && stopBlockers.length === 0}
+        stopBlockers={stopBlockers}
         inspector={
           <Inspector
             intersection={selIntersection}

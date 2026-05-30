@@ -33,17 +33,32 @@ const seed = {
   balancing: { corridorDir: 'NB/SB' },
   analysis: { corridorDir: 'NS', lastRun: null },
   links: [],
-  intersections: [{
-    id: 'i1', num: 1, name: 'Main & Cross', control: 'Signalized',
-    legs: '4-leg', mainDir: 'NB/SB', crossDir: 'EB/WB',
-    lat: 32.85, lng: -116.85,
-    approaches: {
-      EB: { exists: true, lanes: [{ movement: 'T' }], stopControlled: false },
-      WB: { exists: true, lanes: [{ movement: 'T' }], stopControlled: false },
-      NB: { exists: true, lanes: [{ movement: 'T' }], stopControlled: false },
-      SB: { exists: true, lanes: [{ movement: 'T' }], stopControlled: false },
+  intersections: [
+    {
+      id: 'i1', num: 1, name: 'Main & Cross', control: 'Signalized',
+      legs: '4-leg', mainDir: 'NB/SB', crossDir: 'EB/WB',
+      lat: 32.85, lng: -116.85,
+      approaches: {
+        EB: { exists: true, lanes: [{ movement: 'T' }], stopControlled: false },
+        WB: { exists: true, lanes: [{ movement: 'T' }], stopControlled: false },
+        NB: { exists: true, lanes: [{ movement: 'T' }], stopControlled: false },
+        SB: { exists: true, lanes: [{ movement: 'T' }], stopControlled: false },
+      },
     },
-  }],
+    // A second, Signalized intersection so Continue isn't gated on count (>=2);
+    // the gate under test is the stop-control one.
+    {
+      id: 'i2', num: 2, name: 'Main & 2nd', control: 'Signalized',
+      legs: '4-leg', mainDir: 'NB/SB', crossDir: 'EB/WB',
+      lat: 32.86, lng: -116.85,
+      approaches: {
+        EB: { exists: true, lanes: [{ movement: 'T' }], stopControlled: false },
+        WB: { exists: true, lanes: [{ movement: 'T' }], stopControlled: false },
+        NB: { exists: true, lanes: [{ movement: 'T' }], stopControlled: false },
+        SB: { exists: true, lanes: [{ movement: 'T' }], stopControlled: false },
+      },
+    },
+  ],
 }
 
 const checks = []
@@ -143,6 +158,24 @@ await clickControl('Signalized'); await clickControl('Two-way stop')   // EB,WB
   }, { stopped })
   expect('Diagram endpoint renders a PNG with the checked legs', png.ok && png.len > 1000)
 }
+
+// ── Hard gate: a zero-selected stop control blocks Continue ──────────────────
+// State here: Int 1 = Two-way (EB,WB = 2 stops), Int 2 = Signalized → satisfied.
+const continueBtn = page.locator('.di-side__footer .di-btn-primary--block')
+expect('Gate: Continue enabled when every stop control is satisfied',
+  (await continueBtn.isDisabled()) === false)
+await clickControl('One-way stop')                       // Int 1 → 0 selected
+expect('Gate: Continue disabled when a stop control has 0 selected',
+  (await continueBtn.isDisabled()) === true)
+expect('Gate: blocker hint names the offending intersection (Int 1)',
+  ((await page.locator('.di-side__hint--block').textContent()) || '').includes('Int 1'))
+expect('Gate: blocker hint link is clickable',
+  (await page.locator('.di-side__hint-link').count()) >= 1)
+await page.screenshot({ path: '/tmp/stop_control_gate_blocked.png' })
+await page.locator('.di-stopleg', { hasText: /^NB$/ }).click()   // resolve it
+await page.waitForTimeout(150)
+expect('Gate: Continue re-enabled once an approach is selected',
+  (await continueBtn.isDisabled()) === false)
 
 await page.screenshot({ path: '/tmp/stop_control_inspector.png' })
 await b.close()

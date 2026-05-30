@@ -8,6 +8,7 @@ import {
   approachesForControl,
   crossStreetDirs,
   stopHint,
+  incompleteStopControls,
   STOP_CONTROL_TYPES,
   AUTO_FILL_TYPES,
 } from './stopControl.js'
@@ -100,6 +101,52 @@ ok(stopHint('Two-way stop', 2) === null, 'Two-way with exactly 2 → no hint')
 // Auto-fill / non-stop controls never hint (no engineer action expected).
 ok(stopHint('All-way stop', 0) === null, 'All-way stop → no hint (auto-filled)')
 ok(stopHint('Signalized', 0) === null, 'Signalized → no hint (no row)')
+
+// ── incompleteStopControls: the hard-gate input ──────────────────────────────
+const ap = (overrides = {}) => ({
+  EB: { exists: true, stopControlled: false },
+  WB: { exists: true, stopControlled: false },
+  NB: { exists: true, stopControlled: false },
+  SB: { exists: true, stopControlled: false },
+  ...overrides,
+})
+const it = (id, num, control, approaches) => ({ id, num, control, approaches })
+
+// A clean corridor: Two-way with 2 stops, All-way (auto), Signalized → none blocked.
+{
+  const list = [
+    it('a', 1, 'Two-way stop', ap({ EB: { exists: true, stopControlled: true }, WB: { exists: true, stopControlled: true } })),
+    it('b', 2, 'All-way stop', ap({ EB: { exists: true, stopControlled: true }, WB: { exists: true, stopControlled: true }, NB: { exists: true, stopControlled: true }, SB: { exists: true, stopControlled: true } })),
+    it('c', 3, 'Signalized', ap()),
+  ]
+  ok(incompleteStopControls(list).length === 0, 'complete corridor → nothing blocks Continue')
+}
+
+// One-way with 0 stops + Two-way with 0 stops both block; reports their nums.
+{
+  const list = [
+    it('a', 1, 'One-way stop', ap()),                  // 0 → blocked
+    it('b', 2, 'Two-way stop', ap()),                  // 0 (diagonal/unknown) → blocked
+    it('c', 3, 'Two-way stop', ap({ NB: { exists: true, stopControlled: true }, SB: { exists: true, stopControlled: true } })), // ok
+  ]
+  const blockers = incompleteStopControls(list)
+  ok(blockers.length === 2, 'two zero-selected stop controls block Continue')
+  ok(blockers.map((b) => b.num).join() === '1,2', 'blockers report the right intersection nums')
+}
+
+// All-way and Signalized never block even with no flags set.
+ok(incompleteStopControls([it('a', 1, 'All-way stop', ap()), it('b', 2, 'Signalized', ap())]).length === 0,
+  'All-way / Signalized never block')
+
+// A flag on a non-existent leg does NOT satisfy the gate (must exist + be stopped).
+{
+  const list = [it('a', 1, 'Two-way stop', ap({ WB: { exists: false, stopControlled: true } }))]
+  ok(incompleteStopControls(list).length === 1, 'stop flag on a non-existent leg still counts as incomplete')
+}
+
+// Missing approaches object → incomplete (needs stops set).
+ok(incompleteStopControls([it('a', 1, 'One-way stop', undefined)]).length === 1,
+  'stop control with no approaches object → incomplete')
 
 console.log(`stopControl: ${passed} passed, ${failed} failed`)
 if (failed > 0) process.exit(1)

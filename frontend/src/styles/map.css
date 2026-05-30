@@ -403,6 +403,24 @@
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
+/* Blocking variant — names the intersections that gate Continue, each clickable
+   to jump straight to it. Amber (warn) tone, not red: it's a fixable gate. */
+.di-side__hint--block {
+  color: #FFD27A;
+  text-transform: none;
+  letter-spacing: 0;
+  line-height: 1.5;
+}
+.di-side__hint-link {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: var(--accent);
+  cursor: pointer;
+  text-decoration: underline;
+}
+.di-side__hint-link:hover { color: var(--accent-hover); }
 
 .di-int {
   display: flex;
