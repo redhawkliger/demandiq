@@ -46,4 +46,10 @@ jobs:
       - run: pip install -r requirements.txt
       - name: Test suite
         # The runner exposes the interpreter as `python`, not `python3.12`.
+        env:
+          # app.py raises at import if ANTHROPIC_API_KEY is unset. The suites
+          # import app to test /balance-nchrp (pure math) — they never call
+          # Anthropic (only /api/extract does, at app.py:111), so a placeholder
+          # satisfies the import check with zero real API calls.
+          ANTHROPIC_API_KEY: placeholder-not-used-by-tested-endpoints
         run: PYTHON=python ./run_tests.sh
