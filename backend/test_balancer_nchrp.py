@@ -688,6 +688,132 @@ def test_invalid_link_direction_rejected():
     print(f"  test_invalid_link_direction_rejected: PASS (400 + identifies link 1→2 + lists valid axes)")
 
 
+def test_f2_geometry_root_attached_to_link_delta_messages():
+    """F2: when a coincident-coord pair fires GEOMETRY-FALLBACK, every
+    NCHRP-LINK-DELTA on a link touching either endpoint should reference
+    the root cause in its message so engineers don't chase each delta
+    independently."""
+    from fastapi.testclient import TestClient
+    from app import app
+
+    # 3 intersections; Int 2 and Int 3 share coords (geometry collision).
+    # Counts arranged so link conservation breaks on the 2↔3 link in AM.
+    payload = {
+        "intersections": [
+            {"num": 1, "lat": 32.85, "lng": -116.85},
+            {"num": 2, "lat": 32.86, "lng": -116.85},
+            {"num": 3, "lat": 32.86, "lng": -116.85},   # coincident with 2
+        ],
+        "unbalanced_volumes": {
+            "AM": {
+                "1": {"EBL": 50, "EBT": 300, "EBR": 40, "WBL": 30, "WBT": 280, "WBR": 35,
+                      "NBL": 25, "NBT": 480, "NBR": 20, "SBL": 18, "SBT": 510, "SBR": 5},
+                "2": {"EBL": 35, "EBT": 280, "EBR": 45, "WBL": 32, "WBT": 270, "WBR": 38,
+                      "NBL": 28, "NBT": 510, "NBR": 22, "SBL": 20, "SBT": 490, "SBR": 6},
+                "3": {"EBL": 48, "EBT": 285, "EBR": 41, "WBL": 33, "WBT": 265, "WBR": 36,
+                      "NBL": 27, "NBT": 530, "NBR": 21, "SBL": 19, "SBT": 460, "SBR": 5},
+            },
+            "PM": {
+                "1": {"NBT": 560}, "2": {"NBT": 580}, "3": {"NBT": 610},
+            },
+        },
+        "links": [
+            {"fromNum": 1, "toNum": 2, "direction": "NB/SB", "mode": "Full"},
+            {"fromNum": 2, "toNum": 3, "direction": "NB/SB", "mode": "Full"},
+        ],
+        "link_resolution_method": "larger",
+    }
+    client = TestClient(app)
+    r = client.post("/balance-nchrp", json=payload)
+    assert r.status_code == 200, r.text
+    body = r.json()
+
+    geom = [f for f in body['qc_flags'] if f['check'] == 'GEOMETRY-FALLBACK']
+    assert len(geom) == 1, f"expected 1 GEOMETRY-FALLBACK on Int 2↔3; got {len(geom)}: {geom}"
+    assert {geom[0]['fromNum'], geom[0]['toNum']} == {2, 3}
+
+    link_deltas = [f for f in body['qc_flags'] if f['check'] == 'NCHRP-LINK-DELTA']
+    # The 2↔3 cascade should produce at least one NCHRP-LINK-DELTA on a link
+    # touching one of {2, 3}; that flag must reference the geometry root.
+    cascaded = [
+        f for f in link_deltas
+        if 'GEOMETRY-FALLBACK at Int 2↔3' in f['message']
+    ]
+    assert cascaded, (
+        f"expected NCHRP-LINK-DELTA on a 2↔3-touching link to name the "
+        f"GEOMETRY-FALLBACK root; got messages: {[f['message'] for f in link_deltas]}"
+    )
+    # The cascaded flag must NOT carry the generic raw-floor message
+    for f in cascaded:
+        assert 'raw-floor clipping' not in f['message'], (
+            f"geometry-root flag should drop the generic raw-floor hint: {f['message']}"
+        )
+    print(f"  test_f2_geometry_root_attached_to_link_delta_messages: PASS "
+          f"({len(cascaded)} NCHRP-LINK-DELTA flag(s) name the geometry root)")
+
+
+def test_f3_source_outlier_flag_fires_on_typo():
+    """F3: 5-intersection corridor where Int 3 SBT was typed 12 instead of
+    1200. The corridor's SB approach total averages ~430 veh; Int 3 = 18 veh
+    (SBL=2, SBT=12, SBR=4) is >3σ below mean and >50 veh from it. Should
+    fire SOURCE-OUTLIER on Int 3 SB approach (AM); should NOT fire on the
+    other intersections."""
+    from balancer import source_outlier_flags
+    am = {
+        1: {"SBL": 20, "SBT": 420, "SBR": 30},   # total 470
+        2: {"SBL": 18, "SBT": 410, "SBR": 28},   # total 456
+        3: {"SBL":  2, "SBT":  12, "SBR":  4},   # total  18 — TYPO
+        4: {"SBL": 22, "SBT": 415, "SBR": 25},   # total 462
+        5: {"SBL": 19, "SBT": 408, "SBR": 30},   # total 457
+    }
+    flags = source_outlier_flags(am, period='AM')
+    sb_int3 = [f for f in flags if f['int'] == 3 and 'SB' in f['message']]
+    assert len(sb_int3) == 1, f"expected 1 SOURCE-OUTLIER on Int 3 SB; got {flags}"
+    msg = sb_int3[0]['message']
+    assert 'lower' in msg, f"should say 'lower' (Int 3 is below mean): {msg}"
+    assert 'Verify the source count' in msg
+    assert sb_int3[0]['period'] == 'AM'
+    # Other intersections must not be flagged
+    other = [f for f in flags if f['int'] != 3]
+    assert other == [], f"expected no flag on the clean intersections; got {other}"
+    print(f"  test_f3_source_outlier_flag_fires_on_typo: PASS (Int 3 SB flagged, others clean)")
+
+
+def test_f3_no_outlier_on_well_balanced_corridor():
+    """F3: when all leg totals fall within reasonable noise of each other,
+    no SOURCE-OUTLIER should fire (no false-positives on healthy corridors)."""
+    from balancer import source_outlier_flags
+    am = {n: {"NBT": 420 + 10 * (n - 3), "NBR": 30, "NBL": 25} for n in range(1, 6)}
+    flags = source_outlier_flags(am, period='AM')
+    assert flags == [], f"expected no outliers on a flat corridor; got {flags}"
+    print(f"  test_f3_no_outlier_on_well_balanced_corridor: PASS")
+
+
+def test_f3_abs_floor_suppresses_quiet_corridor_false_positives():
+    """F3: a tiny low-volume corridor (T-leg approaches ~15 veh each, stdev
+    ~2 veh) might trigger 3σ on a value 8 veh from mean. The abs_floor_veh
+    guard requires at least 50 veh of absolute deviation in addition; no
+    flag should fire here despite the high sigma."""
+    from balancer import source_outlier_flags
+    am = {1: {"NBT": 13}, 2: {"NBT": 14}, 3: {"NBT": 15}, 4: {"NBT": 16}, 5: {"NBT": 22}}
+    flags = source_outlier_flags(am, period='AM')
+    assert flags == [], (
+        f"abs_floor_veh should suppress sub-50-veh deviations even at "
+        f"high sigma; got {flags}"
+    )
+    print(f"  test_f3_abs_floor_suppresses_quiet_corridor_false_positives: PASS")
+
+
+def test_f3_min_sample_size_skips_tiny_corridors():
+    """F3: with only 2 intersections having an approach, statistics aren't
+    reliable. No flag should fire even on an obvious outlier."""
+    from balancer import source_outlier_flags
+    am = {1: {"NBT": 420}, 2: {"NBT": 12}}
+    flags = source_outlier_flags(am, period='AM')
+    assert flags == [], f"expected no flag on 2-int corridor; got {flags}"
+    print(f"  test_f3_min_sample_size_skips_tiny_corridors: PASS")
+
+
 def test_valid_link_directions_still_accepted():
     """Regression guard: the validation rejects only unknown directions;
     well-formed 'EB/WB' and 'NB/SB' links continue to balance cleanly."""
@@ -733,6 +859,11 @@ if __name__ == '__main__':
         test_geometry_fallback_deduped_across_am_pm,
         test_invalid_link_direction_rejected,
         test_valid_link_directions_still_accepted,
+        test_f2_geometry_root_attached_to_link_delta_messages,
+        test_f3_source_outlier_flag_fires_on_typo,
+        test_f3_no_outlier_on_well_balanced_corridor,
+        test_f3_abs_floor_suppresses_quiet_corridor_false_positives,
+        test_f3_min_sample_size_skips_tiny_corridors,
     ]
     passed = 0
     failed = 0

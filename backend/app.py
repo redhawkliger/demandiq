@@ -31,7 +31,7 @@ from openpyxl.styles import Font, Alignment, PatternFill
 
 from count_agent import extract, MOVEMENTS
 from balancer import balance_corridor, run_qc
-from balancer import balance_nchrp, fractional_volume_flags
+from balancer import balance_nchrp, fractional_volume_flags, source_outlier_flags
 from line_diagram import (
     render_single_diagram,
     render_diagram_grid,
@@ -440,6 +440,12 @@ async def balance_nchrp_endpoint(payload: dict):
     # RAW inputs, before balancing). Surfaced alongside the NCHRP-* flags.
     qc_all += fractional_volume_flags(am_raw, period='AM')
     qc_all += fractional_volume_flags(pm_raw, period='PM')
+    # F3 — source-data outlier warnings: flag intersections whose leg-approach
+    # total is statistically implausible against the rest of the corridor (e.g.
+    # an SBT count typed as 12 instead of 1200). Furness silently absorbs
+    # these without this check.
+    qc_all += source_outlier_flags(am_raw, period='AM')
+    qc_all += source_outlier_flags(pm_raw, period='PM')
 
     # GEOMETRY-FALLBACK is corridor-level (geometry, not volumes) — AM and PM
     # share the same coords + links, so the flag would repeat. Dedupe by

@@ -958,6 +958,113 @@ def _build_link_modes(links, coords=None):
     return out
 
 
+def _median(values):
+    """Median of a non-empty iterable. Integer-safe; returns float."""
+    s = sorted(values)
+    n = len(s)
+    mid = n // 2
+    if n % 2:
+        return float(s[mid])
+    return (s[mid - 1] + s[mid]) / 2.0
+
+
+def source_outlier_flags(raw_volumes, period=None,
+                         sigma_threshold=3.0, abs_floor_veh=50.0,
+                         min_intersections=3):
+    """F3 — source-data QC: flag intersections whose leg-approach total is
+    statistically implausible against the corridor's other intersections.
+
+    Catches data-entry mistakes that Furness silently absorbs — e.g. a SBT
+    count typed as 12 instead of 1200 reads as a normal balanced result if
+    the only signal is "the algorithm converged." This is a read-only check
+    on RAW inputs (the leg's L+T+R sum per approach direction) BEFORE
+    balancing, peer to fractional_volume_flags.
+
+    Uses median + median-absolute-deviation (MAD) — a single extreme typo
+    inflates the sample stdev enough to mask itself, but the median + MAD
+    pair is robust to contamination. Robust-σ ≈ 1.4826 × MAD makes the unit
+    consistent with the spec's "X σ from the corridor center" reading.
+
+    For each leg direction (EB / WB / NB / SB):
+      1. Collect the leg approach total at every intersection that HAS that
+         approach (T-intersection missing legs are excluded — their absence
+         is structural, not an outlier).
+      2. Skip if fewer than min_intersections samples (stats noisy on tiny
+         corridors).
+      3. Compute corridor median + MAD-based robust σ. Flag any intersection
+         whose |total - median| exceeds BOTH sigma_threshold × robust σ AND
+         abs_floor_veh. The absolute floor prevents low-volume corridors
+         (median ≈ 15, MAD ≈ 1, robust σ ≈ 1.5 veh) from false-positiving on
+         a 5-veh wobble that's statistically extreme but operationally
+         meaningless.
+
+    Args:
+        raw_volumes: { int_num: { movement: value } }
+        period:      optional 'AM'|'PM' baked into the message
+        sigma_threshold:  multiples of robust σ to trigger (default 3.0)
+        abs_floor_veh:    absolute deviation required in addition (default 50)
+        min_intersections: minimum sample size before the leg's stats are
+                          considered reliable (default 3)
+
+    Returns: list of {'check','int','message'[,'period']} dicts, sorted by
+    int_num then leg direction for deterministic order.
+    """
+    DIRECTIONS = ('EB', 'WB', 'NB', 'SB')
+    LTR = ('L', 'T', 'R')
+    # 1.4826 × MAD ≈ σ for Gaussian data; standard robust-σ conversion.
+    MAD_TO_SIGMA = 1.4826
+    flags = []
+
+    for direction in DIRECTIONS:
+        totals = {}
+        for int_num in sorted(raw_volumes.keys()):
+            vols = raw_volumes[int_num] or {}
+            cells = [vols.get(f'{direction}{m}', 0) or 0 for m in LTR]
+            # Skip missing legs (all-zero across L/T/R means structural absence
+            # OR a fully-empty raw — neither case is statistically meaningful).
+            if not any(c > 0 for c in cells):
+                continue
+            totals[int_num] = sum(c for c in cells if isinstance(c, (int, float)))
+
+        if len(totals) < min_intersections:
+            continue
+
+        vals = list(totals.values())
+        med = _median(vals)
+        mad = _median([abs(v - med) for v in vals])
+        # MAD == 0 → most of the values are identical; we have no scale to
+        # measure deviation against. Skip rather than fire arbitrary alarms.
+        if mad <= 0:
+            continue
+        robust_sigma = MAD_TO_SIGMA * mad
+
+        for int_num in sorted(totals.keys()):
+            total = totals[int_num]
+            dev = total - med
+            if abs(dev) < abs_floor_veh:
+                continue
+            sigma = abs(dev) / robust_sigma
+            if sigma < sigma_threshold:
+                continue
+            pstr = f" ({period})" if period else ""
+            direction_word = 'lower' if dev < 0 else 'higher'
+            flag = {
+                'check': 'SOURCE-OUTLIER',
+                'int': int_num,
+                'message': (
+                    f"Int {int_num} {direction} approach total = {total:.0f} veh{pstr}, "
+                    f"corridor median = {med:.0f} (robust σ={robust_sigma:.0f}) "
+                    f"— {sigma:.1f}σ {direction_word}. Verify the source count."
+                ),
+            }
+            if period:
+                flag['period'] = period
+            flags.append(flag)
+
+    flags.sort(key=lambda f: (f['int'], f['message']))
+    return flags
+
+
 def fractional_volume_flags(raw_volumes, period=None, eps=1e-6):
     """Stage 10.1 — source-data QC: flag RAW movement values that aren't
     whole numbers (the fractional data-entry bug). This is a read-only
@@ -1285,6 +1392,23 @@ def balance_nchrp(
     # ── Final link conservation (post-reconciliation) ───────────────────
     link_conservation = compute_link_conservation(balanced, resolved, link_modes)
 
+    # F2: build a lookup so NCHRP-LINK-DELTA / -LANDUSE-DELTA flags can name
+    # the GEOMETRY-FALLBACK they're likely a symptom of. A single coord
+    # collision typically corrupts the 4 directed links touching the two
+    # ints; surfacing the root prevents the engineer from chasing each delta
+    # independently.
+    geom_int_to_pair = {}
+    for (lo, hi) in geometry_fallbacks:
+        geom_int_to_pair[lo] = (lo, hi)
+        geom_int_to_pair[hi] = (lo, hi)
+
+    def _geometry_root_hint(entry):
+        pair = geom_int_to_pair.get(entry['fromNum']) or geom_int_to_pair.get(entry['toNum'])
+        if not pair:
+            return ''
+        return (f" Likely caused by GEOMETRY-FALLBACK at Int {pair[0]}↔{pair[1]} "
+                f"(resolve coords there first).")
+
     # Flag Full links that still violate conservation (rare — happens when
     # _adjust_leg_to_target can't shrink due to raw-floor constraints).
     LINK_POST_ROUND_TOL = 10.0
@@ -1292,16 +1416,19 @@ def balance_nchrp(
         if entry.get('mode') != 'Full':
             continue
         if abs(entry['delta']) > 0.5:
+            root = _geometry_root_hint(entry)
+            base = (
+                f"Link {entry['fromNum']}→{entry['toNum']} {entry['direction']} "
+                f"({entry['mode']}): delta {entry['delta']:+.1f} veh post-reconciliation "
+                f"— upstream {entry['upstream_outflow']:.0f}, "
+                f"downstream {entry['downstream_inflow']:.0f}."
+            )
+            tail = (root if root
+                    else " Likely a raw-floor clipping issue on one of the leg's L/T/R cells.")
             qc_flags.append({
                 'check': 'NCHRP-LINK-DELTA',
                 'int': entry['fromNum'],
-                'message': (
-                    f"Link {entry['fromNum']}→{entry['toNum']} {entry['direction']} "
-                    f"({entry['mode']}): delta {entry['delta']:+.1f} veh post-reconciliation "
-                    f"— upstream {entry['upstream_outflow']:.0f}, "
-                    f"downstream {entry['downstream_inflow']:.0f}. Likely a raw-floor "
-                    f"clipping issue on one of the leg's L/T/R cells."
-                ),
+                'message': base + tail,
             })
 
     # NCHRP-LANDUSE-DELTA: report Land Use link deltas as informational
@@ -1309,6 +1436,7 @@ def balance_nchrp(
         if entry.get('mode') != 'Land Use':
             continue
         if abs(entry['delta']) > 0.5:
+            root = _geometry_root_hint(entry)
             qc_flags.append({
                 'check': 'NCHRP-LANDUSE-DELTA',
                 'int': entry['fromNum'],
@@ -1317,7 +1445,7 @@ def balance_nchrp(
                     f"(Land Use): downstream {entry['downstream_inflow']:.0f} − "
                     f"upstream {entry['upstream_outflow']:.0f} = "
                     f"{entry['delta']:+.0f} veh land-use delta (expected; counts are "
-                    f"intentionally not reconciled on this link)."
+                    f"intentionally not reconciled on this link)." + root
                 ),
             })
 
