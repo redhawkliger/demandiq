@@ -28,6 +28,7 @@ from line_diagram import (
     render_corridor_diagram,
     render_diagram_grid,
     _segment_label_for_pair,
+    collect_wrap_segment_labels,
     FIG_INCHES,
     DPI,
 )
@@ -184,6 +185,62 @@ def test_per_cell_rendering_byte_identical_when_no_segments():
     print(f"  3. PER-CELL BYTE-IDENTICAL: PASS ({len(corr_png)} bytes match)")
 
 
+# ── F6: cross-row footnote collector ───────────────────────────────────────
+def test_f6_wrap_segments_in_row_wrap_layout():
+    """F6: a corridor wider than `cols` produces wrap_segments for adjacent
+    pairs that fall on different rows of the grid. Uses a synthetic 6-cell
+    fixture where every adjacent pair has a resolved-link entry — so the
+    expected wrap pairs are deterministic regardless of corridor topology.
+    cols=3 → cell index boundary at 2→3 (ints 3→4); cols=2 → boundaries at
+    1→2 (ints 2→3) and 3→4 (ints 4→5)."""
+    cells = [
+        {'geo': {'num': n, 'active_legs': ['EB', 'WB'], 'control': 'Signalized',
+                 'streets': {'EW': 'Main', 'NS': f'S{n}'}, 'stopped_approaches': []},
+         'u_vols': {}, 'b_vols': {}, 'overrides': {}}
+        for n in range(1, 7)        # ints 1..6
+    ]
+    resolved = []
+    for u in range(1, 6):
+        resolved.append({'fromNum': u, 'toNum': u + 1, 'direction': 'EB', 'volume': 100 * u})
+        resolved.append({'fromNum': u + 1, 'toNum': u, 'direction': 'WB', 'volume': 100 * u + 50})
+
+    # cols=3 → boundary at cells[2]→cells[3] only (ints 3→4)
+    wraps3 = collect_wrap_segment_labels(cells, cols=3,
+                                          resolved_links=resolved, corridor_dir='EB/WB')
+    assert len(wraps3) == 1, f"cols=3 → 1 wrap label expected; got {len(wraps3)}: {wraps3}"
+    assert '3→4' in wraps3[0] or '4→3' in wraps3[0], wraps3[0]
+
+    # cols=2 → boundaries at cells[1]→cells[2] (ints 2→3) and cells[3]→cells[4] (ints 4→5)
+    wraps2 = collect_wrap_segment_labels(cells, cols=2,
+                                          resolved_links=resolved, corridor_dir='EB/WB')
+    assert len(wraps2) == 2, f"cols=2 → 2 wrap labels expected; got {len(wraps2)}: {wraps2}"
+    assert ('2→3' in wraps2[0] or '3→2' in wraps2[0]), wraps2[0]
+    assert ('4→5' in wraps2[1] or '5→4' in wraps2[1]), wraps2[1]
+    print(f"  F6 WRAP SEGMENTS: PASS (cols=3 → {wraps3}; cols=2 → {wraps2})")
+
+
+def test_f6_no_wrap_segments_when_single_row():
+    """F6: a corridor that fits in one row (cols >= n) has no row boundaries,
+    so wrap_segments must be empty and the footnote band must not render."""
+    cells = _build_cells(AM['balanced'])
+    wraps = collect_wrap_segment_labels(cells, cols=len(cells),
+                                         resolved_links=AM_RESOLVED,
+                                         corridor_dir=CORRIDOR_DIR)
+    assert wraps == [], f"single-row layout should produce no wrap segments; got {wraps}"
+    print(f"  F6 SINGLE-ROW: PASS (no wrap segments when cols == n)")
+
+
+def test_f6_empty_resolved_links_no_wrap_segments():
+    """F6: empty resolved_links → no labels can be looked up → wrap_segments
+    must be empty regardless of the row layout."""
+    cells = _build_cells(AM['balanced'])
+    wraps = collect_wrap_segment_labels(cells, cols=3,
+                                         resolved_links=[],
+                                         corridor_dir=CORRIDOR_DIR)
+    assert wraps == [], f"empty resolved_links should produce no labels; got {wraps}"
+    print(f"  F6 EMPTY LINKS: PASS")
+
+
 # ── 4. Empty resolved_links does not crash ─────────────────────────────────
 def test_empty_resolved_links_renders_cleanly():
     cells = _build_cells(AM['balanced'])
@@ -198,6 +255,9 @@ if __name__ == '__main__':
         test_renders_png_both_periods,
         test_segment_label_count_matches_corridor_links,
         test_per_cell_rendering_byte_identical_when_no_segments,
+        test_f6_wrap_segments_in_row_wrap_layout,
+        test_f6_no_wrap_segments_when_single_row,
+        test_f6_empty_resolved_links_no_wrap_segments,
         test_empty_resolved_links_renders_cleanly,
     ]
     passed = failed = 0

@@ -14,21 +14,16 @@ import {
 } from '../store/projectStore'
 import { exportDiagnostics } from '../lib/diagnostics'
 import { dropsSummary, formatIntRange, MAJOR_DROP_THRESHOLD_VEH } from '../lib/dropsSummary'
+import { computeHeroState } from '../lib/heroState'
+import { buildResolvedRows } from '../lib/resolvedTargets'
 
 import '../styles/forms.css'
 import '../styles/map.css'         // .di-banner, .di-btn-primary
 import '../styles/balancing.css'   // segmented/toggle styles aren't used, but harmless
 import '../styles/analysis.css'
 
-// Sanity threshold: a Full-mode link with a resolved volume below this is
-// almost certainly a missing/wrong raw count rather than a genuinely tiny link.
-const SUSPICIOUS_VOLUME_VEH = 10
-// F7: reconciliation_delta = |raw_upstream - raw_downstream|. Below this
-// threshold the algorithm's smoothing is normal daily-count noise; above it,
-// the engineer should know how much the algorithm hid from them (e.g. the
-// audit fixture's planted 300-veh disagreement at Int 8↔9 used to silently
-// resolve to delta=0).
-const RECON_DELTA_NOTABLE_VEH = 20
+// SUSPICIOUS_VOLUME_VEH + RECON_DELTA_NOTABLE_VEH live in lib/resolvedTargets.js
+// alongside buildResolvedRows so the row-computation logic is unit-testable.
 
 function hasAnyVolumes(intersections) {
   for (const it of intersections) {
@@ -306,11 +301,9 @@ export default function S6_RunAnalysis() {
   const linkResolutionSkipped =
     hasResults && linksConfigured > 0 &&
     amResolved.length === 0 && pmResolved.length === 0
-  const heroState = !hasResults ? 'idle'
-    : linkResolutionSkipped ? 'fail'
-    : !allConverged ? 'fail'
-    : (!allConserved || hasDrops) ? 'warn'
-    : 'ok'
+  const heroState = computeHeroState({
+    hasResults, linkResolutionSkipped, allConverged, allConserved, hasDrops,
+  })
 
   return (
     <div className="di-s6">
@@ -629,26 +622,7 @@ function ResolvedTargets({ am, pm, intersections }) {
     return resolveLinkMode(fromId, toId)
   }
 
-  // Merge AM/PM by composite key.
-  const key = (r) => `${r.fromNum}|${r.toNum}|${r.direction}`
-  const pmByKey = new Map(pm.map((r) => [key(r), r]))
-  const rows = am.map((a) => {
-    const p = pmByKey.get(key(a)) ?? null
-    const mode = modeFor(a.fromNum, a.toNum)
-    const suspicious = mode === 'Full' && (
-      (Number(a.volume) > 0 && Number(a.volume) < SUSPICIOUS_VOLUME_VEH) ||
-      (p && Number(p.volume) > 0 && Number(p.volume) < SUSPICIOUS_VOLUME_VEH)
-    )
-    // F7: peak reconciliation delta across periods. If both raw_upstream
-    // and raw_downstream came through, |dn - up| tells the engineer how
-    // far apart the two raw counts were; the algorithm picked one side
-    // (Larger) or averaged (Average) without telling them.
-    const amRecon = Number(a.reconciliation_delta ?? 0)
-    const pmRecon = Number(p?.reconciliation_delta ?? 0)
-    const reconPeak = Math.max(amRecon, pmRecon)
-    const smoothed = reconPeak >= RECON_DELTA_NOTABLE_VEH
-    return { a, p, mode, suspicious, amRecon, pmRecon, reconPeak, smoothed }
-  })
+  const rows = buildResolvedRows({ am, pm, getMode: modeFor })
   const suspiciousCount = rows.filter((r) => r.suspicious).length
   const smoothedCount = rows.filter((r) => r.smoothed).length
 

@@ -633,6 +633,34 @@ def _segment_label_for_pair(from_num, to_num, resolved_links, corridor_dir):
     return (text, float(vol))
 
 
+def collect_wrap_segment_labels(cells, cols, resolved_links, corridor_dir):
+    """F6: labels for adjacent-cell pairs that fall on different rows of the
+    grid (e.g. 3→4 when row 0 ends at int 3 and row 1 starts at int 4).
+
+    These would otherwise be dropped from the in-figure segment loop and the
+    corridor flow story would be partial. The corridor diagram surfaces this
+    list as a footnote band below the figure.
+
+    Returns: list[str] of "<from>→<to>: <volume> veh" labels, in cell order.
+    Empty when cols == n (single row) or when resolved_links is empty.
+
+    Pure function: no matplotlib state, no I/O — safe to unit-test.
+    """
+    out = []
+    n = len(cells)
+    for i in range(n - 1):
+        if i // cols == (i + 1) // cols:
+            continue
+        a_geo = cells[i]['geo']
+        b_geo = cells[i + 1]['geo']
+        text, _vol = _segment_label_for_pair(
+            int(a_geo['num']), int(b_geo['num']), resolved_links, corridor_dir,
+        )
+        if text is not None:
+            out.append(text)
+    return out
+
+
 def render_corridor_diagram(cells, resolved_links, corridor_dir, period_label,
                             view_mode='combined', cols=GRID_DEFAULT_COLS,
                             title=None):
@@ -670,21 +698,7 @@ def render_corridor_diagram(cells, resolved_links, corridor_dir, period_label,
     cell_in = FIG_INCHES
     p = _single_cell_preset(cell_in)
 
-    # F6: collect labels for adjacent pairs whose cells fall on different rows
-    # of the grid (e.g. 3→4 when row 0 ends at int 3 and row 1 starts at int 4).
-    # These are dropped from the in-figure segment-label loop below but get
-    # surfaced in a footnote so the corridor flow story isn't partial.
-    wrap_segments = []
-    for i in range(n - 1):
-        if i // cols == (i + 1) // cols:
-            continue
-        a_geo = cells[i]['geo']
-        b_geo = cells[i + 1]['geo']
-        text, _vol = _segment_label_for_pair(
-            int(a_geo['num']), int(b_geo['num']), resolved_links, corridor_dir,
-        )
-        if text is not None:
-            wrap_segments.append(text)
+    wrap_segments = collect_wrap_segment_labels(cells, cols, resolved_links, corridor_dir)
 
     title_h = 0.6 if title else 0.0
     # Reserve a thin footnote band for the cross-row segments when present.

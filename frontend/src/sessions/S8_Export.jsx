@@ -10,6 +10,7 @@ import {
 
 import { subscribe, getSnapshot } from '../store/projectStore'
 import { buildGridCell, intersectionGeo, stripVols } from '../lib/diagramPayload'
+import { convergenceLabel } from '../lib/convergenceLabel'
 
 import '../styles/forms.css'
 import '../styles/map.css'        // .di-modal*, .di-banner, .di-btn-primary, .di-btn-secondary
@@ -242,10 +243,6 @@ export default function S8_Export() {
   // ── Summary derivation ──────────────────────────────────────────────
   const intCount = intersections.length
   const corridor = balancing.corridorDir ?? snap.analysis?.corridorDir ?? '—'
-  // F8: convergenceThreshold is already in veh (S5 stores 0.5, the backend
-  // consumes 0.5 veh). The previous '*100 ... %' rendering was a leftover
-  // from when the field was modelled as a fractional residual.
-  const convTolVeh = (balancing.convergenceThreshold ?? 0.5).toFixed(2)
   // Convergence is per-intersection. Read the SAME field S6 reports from
   // (lastRun.intConverged); the old code read lastRun.convergence — a field the
   // balancer never returns — so the export header always showed "0/2 converged"
@@ -271,7 +268,10 @@ export default function S8_Export() {
               <SumRow k="Date"          v={project.date || '—'} />
               <SumRow k="Scenario"      v={project.scenario || '—'} />
               <SumRow k="Corridor"      v={corridor === 'EW' ? 'EB/WB' : corridor === 'NS' ? 'NB/SB' : corridor} />
-              <SumRow k="Convergence"   v={`AM ${amOk}/${intCount} · PM ${pmOk}/${intCount} (${convTolVeh} veh threshold)`} />
+              <SumRow k="Convergence"   v={convergenceLabel({
+                intCount, amConverged: amOk, pmConverged: pmOk,
+                convergenceThreshold: balancing.convergenceThreshold,
+              })} />
               <SumRow k="QC"            v={qcCount === 0 ? 'Clean' : `${qcCount} flag${qcCount === 1 ? '' : 's'}`} />
             </div>
           </div>
