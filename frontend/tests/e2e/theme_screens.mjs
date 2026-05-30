@@ -32,9 +32,9 @@ const OUT = '/tmp/theme_shots'
 mkdirSync(OUT, { recursive: true })
 
 // ── Alpine corridor fixture (5 NB intersections near Alpine, CA) ────────────
-// legs is the UI's '4-leg'/'3-leg' string (what IntersectionModal stores), NOT
-// the {N,S,E,W} object — S2 renders legs as a React child, so the object form
-// would crash the page (and tank the map screenshots).
+// legs is the UI's '4-leg'/'3-leg' string (what S2 stores), NOT the {N,S,E,W}
+// object — S2 renders legs as a React child, so the object form would crash the
+// page (and tank the map screenshots).
 const LTR = [{ movement: 'LTR' }]
 const FULL_APPROACHES = {
   EB: { exists: true, lanes: LTR }, WB: { exists: true, lanes: LTR },
