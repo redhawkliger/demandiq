@@ -323,6 +323,88 @@ def test_provenance_qc_empty_renders_all_clean():
     print(f"  test_provenance_qc_empty_renders_all_clean: PASS")
 
 
+def test_provenance_includes_resolved_link_targets_with_f7_recon():
+    """F7 in the deliverable: a 'Resolved link targets' section sits between
+    Per-intersection convergence and QC flags, with columns
+    Period | From | To | Dir | Target | Raw upstream | Raw downstream | Recon Δ.
+    Surfaces the algorithm's silent smoothing in the Excel, not just on S6.
+    Skipped for legacy runs whose resolvedLinks have no raw_upstream."""
+    project_state = {
+        'project': {'name': 'F7 fixture', 'analysisPeriods': ['AM', 'PM']},
+        'intersections': [
+            {'num': 1, 'name': 'A', 'approaches': {},
+             'volumes': {'AM': {}, 'PM': {}}, 'balanced': {'AM': {}, 'PM': {}}},
+            {'num': 2, 'name': 'B', 'approaches': {},
+             'volumes': {'AM': {}, 'PM': {}}, 'balanced': {'AM': {}, 'PM': {}}},
+        ],
+        'balancing': {'overrides': {'AM': {}, 'PM': {}}},
+        'analysis': {'lastRun': {
+            'timestamp': '2026-05-29T19:00:00.000Z',
+            'method': 'larger',
+            'resolvedLinks': {
+                'AM': [
+                    {'fromNum': 1, 'toNum': 2, 'direction': 'NB',
+                     'volume': 690, 'raw_upstream': 402, 'raw_downstream': 690,
+                     'reconciliation_delta': 288},
+                    {'fromNum': 2, 'toNum': 1, 'direction': 'SB',
+                     'volume': 450, 'raw_upstream': 450, 'raw_downstream': 445,
+                     'reconciliation_delta': 5},
+                ],
+                'PM': [
+                    {'fromNum': 1, 'toNum': 2, 'direction': 'NB',
+                     'volume': 720, 'raw_upstream': 410, 'raw_downstream': 720,
+                     'reconciliation_delta': 310},
+                    {'fromNum': 2, 'toNum': 1, 'direction': 'SB',
+                     'volume': 480, 'raw_upstream': 480, 'raw_downstream': 475,
+                     'reconciliation_delta': 5},
+                ],
+            },
+            'qcFlags': [],
+            'config': {
+                'linkResolution': 'larger', 'peakMode': 'Corridor',
+                'amWindow': {'start': '07:00', 'end': '09:00'},
+                'pmWindow': {'start': '16:00', 'end': '18:00'},
+                'convergenceThreshold': 0.5, 'maxIterations': 500,
+                'corridorDir': 'NB/SB',
+            },
+        }},
+    }
+    wb = load_workbook(io.BytesIO(build_workbook(project_state)), data_only=True)
+    ws = wb['Provenance']
+
+    # Locate section header
+    sec_row = None
+    for r in range(1, ws.max_row + 1):
+        if ws.cell(row=r, column=1).value == 'Resolved link targets':
+            sec_row = r
+            break
+    assert sec_row is not None, 'Resolved link targets section header missing'
+
+    headers = [ws.cell(row=sec_row + 1, column=c).value for c in range(1, 9)]
+    expected = ['Period', 'From', 'To', 'Dir',
+                'Target veh', 'Raw upstream', 'Raw downstream', 'Recon Δ']
+    assert headers == expected, f'header mismatch: {headers}'
+
+    # 4 data rows expected (2 AM + 2 PM); pull all rows after the header
+    data_rows = []
+    for r in range(sec_row + 2, ws.max_row + 1):
+        first = ws.cell(row=r, column=1).value
+        if first in ('QC flags', None, ''):
+            break
+        data_rows.append([ws.cell(row=r, column=c).value for c in range(1, 9)])
+    assert len(data_rows) == 4, f'expected 4 link rows; got {len(data_rows)}: {data_rows}'
+
+    # Spot-check the AM 1→2 NB row — the planted 288-veh smoothing.
+    am_1to2 = next((row for row in data_rows if row[:4] == ['AM', 1, 2, 'NB']), None)
+    assert am_1to2 is not None, f'AM 1→2 NB row missing; got {data_rows}'
+    assert am_1to2[4] == 690, f'target volume = 690; got {am_1to2[4]}'
+    assert am_1to2[5] == 402, f'raw_upstream = 402; got {am_1to2[5]}'
+    assert am_1to2[6] == 690, f'raw_downstream = 690; got {am_1to2[6]}'
+    assert am_1to2[7] == 288, f'recon Δ = 288; got {am_1to2[7]}'
+    print(f"  test_provenance_includes_resolved_link_targets_with_f7_recon: PASS "
+          f"(AM 1→2 NB row: target=690 raw_up=402 raw_dn=690 recon=288)")
+
+
 def test_provenance_legacy_run_degrades_gracefully():
     """Legacy (pre-NCHRP) run without lastRun.config + per-int fields renders
     '—' in the metadata block rather than crashing (PRD risk note)."""
@@ -357,6 +439,7 @@ if __name__ == '__main__':
         test_combined_view_sheet,
         test_provenance_tab_structure,
         test_provenance_qc_empty_renders_all_clean,
+        test_provenance_includes_resolved_link_targets_with_f7_recon,
         test_provenance_legacy_run_degrades_gracefully,
     ]
     passed = 0; failed = 0

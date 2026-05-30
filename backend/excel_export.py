@@ -253,6 +253,52 @@ def _write_provenance(wb, project_state):
 
     r += 1  # spacer
 
+    # ── Resolved link targets section (F7) ──────────────────────────────
+    # Surfaces the algorithm's silent smoothing — the raw upstream and
+    # downstream counts that fed each resolved volume, plus their absolute
+    # disagreement. A 300-veh gap between raw_up and raw_dn that Larger
+    # picked one side of used to be invisible in the deliverable; now it's
+    # in a column. Skipped entirely for legacy runs whose resolvedLinks
+    # entries don't carry raw_upstream / raw_downstream.
+    resolved_am = (last_run.get('resolvedLinks') or {}).get('AM') or []
+    resolved_pm = (last_run.get('resolvedLinks') or {}).get('PM') or []
+    has_raw_recon = any(
+        r.get('raw_upstream') is not None and r.get('raw_downstream') is not None
+        for r in (resolved_am + resolved_pm)
+    )
+    if has_raw_recon:
+        sec = ws.cell(row=r, column=1, value='Resolved link targets')
+        _style_header(sec)
+        ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=8)
+        r += 1
+        rt_headers = ['Period', 'From', 'To', 'Dir',
+                      'Target veh', 'Raw upstream', 'Raw downstream', 'Recon Δ']
+        for col, label in enumerate(rt_headers, start=1):
+            _style_header(ws.cell(row=r, column=col, value=label))
+        r += 1
+
+        def _num(v):
+            return float(v) if isinstance(v, (int, float)) else None
+
+        for period, entries in (('AM', resolved_am), ('PM', resolved_pm)):
+            # Stable order: from, to, direction.
+            sorted_entries = sorted(
+                entries,
+                key=lambda e: (e.get('fromNum', 0), e.get('toNum', 0), e.get('direction') or ''),
+            )
+            for e in sorted_entries:
+                _style_data(ws.cell(row=r, column=1, value=period))
+                _style_data(ws.cell(row=r, column=2, value=e.get('fromNum', '')), fmt='0')
+                _style_data(ws.cell(row=r, column=3, value=e.get('toNum', '')), fmt='0')
+                _style_data(ws.cell(row=r, column=4, value=e.get('direction') or ''))
+                _style_data(ws.cell(row=r, column=5, value=_num(e.get('volume'))), fmt='0')
+                _style_data(ws.cell(row=r, column=6, value=_num(e.get('raw_upstream'))), fmt='0')
+                _style_data(ws.cell(row=r, column=7, value=_num(e.get('raw_downstream'))), fmt='0')
+                _style_data(ws.cell(row=r, column=8, value=_num(e.get('reconciliation_delta'))), fmt='0')
+                r += 1
+
+        r += 1  # spacer before QC
+
     # ── QC flags section ────────────────────────────────────────────────
     qc_flags = last_run.get('qcFlags') or []
     sec = ws.cell(row=r, column=1, value='QC flags')
