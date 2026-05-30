@@ -831,4 +831,9 @@ async def health():
 if __name__ == "__main__":
     import uvicorn
     port = int(os.getenv("PORT", 8000))
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    # DEMANDIQ_DEV=1 turns on uvicorn auto-reload for local development (restarts
+    # on source edits). Reload requires the "module:app" import string rather than
+    # the app object. Production (Render) leaves DEMANDIQ_DEV unset, so the server
+    # never watches the filesystem.
+    reload = os.getenv("DEMANDIQ_DEV") == "1"
+    uvicorn.run("app:app", host="0.0.0.0", port=port, reload=reload)
