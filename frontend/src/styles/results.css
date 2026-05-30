@@ -96,7 +96,7 @@
   width: 24px;
   height: 24px;
   border-radius: 50%;
-  background: #0A84FF;
+  background: var(--accent);
   color: #fff;
   font-size: 11px;
   font-weight: 600;
@@ -194,7 +194,7 @@
 
 /* ── Map overlays ────────────────────────────────────────────────────── */
 .di-s7__right .leaflet-container {
-  background: #07080D;
+  background: var(--bg-base);
   font-family: var(--font-sans);
 }
 .di-s7__right .leaflet-control-zoom a {
@@ -241,7 +241,7 @@
 
 /* ── Leaflet popup styling ───────────────────────────────────────────── */
 .di-pop-wrap .leaflet-popup-content-wrapper {
-  background: #0F1118;
+  background: var(--bg-deep);
   border: 1px solid var(--border);
   border-radius: 10px;
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
@@ -252,7 +252,7 @@
   font-family: var(--font-sans);
 }
 .di-pop-wrap .leaflet-popup-tip {
-  background: #0F1118;
+  background: var(--bg-deep);
   border: 1px solid var(--border);
 }
 .di-pop {
@@ -273,7 +273,7 @@
   display: inline-flex;
   width: 18px;
   height: 18px;
-  background: #0A84FF;
+  background: var(--accent);
   color: white;
   border-radius: 50%;
   align-items: center;

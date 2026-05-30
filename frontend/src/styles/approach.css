@@ -138,7 +138,7 @@
   width: 32px;
   height: 32px;
   border-radius: 50%;
-  background: #0A84FF;
+  background: var(--accent);
   color: #fff;
   font-size: 13px;
   font-weight: 600;
@@ -314,7 +314,7 @@
 }
 .di-ap-pill--blue {
   background: rgba(10, 132, 255, 0.10);
-  color: #4DA9FF;
+  color: var(--accent-hover);
   border: 1px solid rgba(10, 132, 255, 0.30);
 }
 .di-ap-pill--amber {

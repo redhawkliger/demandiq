@@ -251,7 +251,7 @@ td.di-vol-dir {
 
 /* Header rows — both sticky-top */
 .di-vol-th {
-  background: #0F1118;
+  background: var(--bg-deep);
   font-weight: 500;
   color: var(--text-secondary);
   font-size: 11px;
@@ -296,7 +296,7 @@ td.di-vol-dir {
 }
 .di-vol-meta__num {
   display: inline-block;
-  background: #0A84FF;
+  background: var(--accent);
   color: white;
   width: 22px;
   height: 22px;
@@ -324,7 +324,7 @@ td.di-vol-dir {
 }
 .di-vol-meta__vendor {
   background: rgba(10, 132, 255, 0.10);
-  color: #4DA9FF;
+  color: var(--accent-hover);
   padding: 1px 5px;
   border-radius: 3px;
   border: 1px solid rgba(10, 132, 255, 0.3);
@@ -587,7 +587,7 @@ td.di-vol-dir {
   width: 100%;
   height: 32px;
   padding: 0 8px;
-  background: #1A1D26;
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 6px;
   color: var(--text-primary);

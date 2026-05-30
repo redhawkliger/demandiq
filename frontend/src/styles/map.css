@@ -13,7 +13,7 @@
 
 /* ── Leaflet overrides ──────────────────────────────────────────────── */
 .di-s2 .leaflet-container {
-  background: #07080D;
+  background: var(--bg-base);
   cursor: default;                 /* context-sensitive: see rules below */
   font-family: var(--font-sans);
 }
@@ -128,7 +128,7 @@
   width: 28px;
   height: 28px;
   border-radius: 50%;
-  background: #0A84FF;
+  background: var(--accent);
   color: #FFFFFF;
   font-family: var(--font-sans);
   font-size: 12px;
@@ -136,7 +136,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  border: 2px solid #07080D;
+  border: 2px solid var(--bg-base);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(10, 132, 255, 0.45);
   margin: 2px;
 }
@@ -448,7 +448,7 @@
   height: 28px;
   flex-shrink: 0;
   border-radius: 50%;
-  background: #0A84FF;
+  background: var(--accent);
   color: #FFFFFF;
   font-size: 12px;
   font-weight: 600;
@@ -525,7 +525,7 @@
   max-height: 90vh;
   display: flex;
   flex-direction: column;
-  background: #0F1118;
+  background: var(--bg-deep);
   border: 1px solid var(--border);
   border-radius: 14px;
   box-shadow: 0 24px 60px rgba(0, 0, 0, 0.6);
@@ -597,7 +597,7 @@
   width: 100%;
   height: 44px;
   padding: 0 36px 0 14px;
-  background-color: #1A1D26;
+  background-color: var(--surface);
   border: 1px solid var(--border);
   border-radius: 8px;
   color: var(--text-primary);
@@ -1003,7 +1003,7 @@
   transform: translate(-50%, 16px);
   width: 260px;
   padding: 14px;
-  background: #0F1118;
+  background: var(--bg-deep);
   border: 1px solid var(--border-strong);
   border-radius: 12px;
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6);
@@ -1183,7 +1183,7 @@
   align-items: center;
   gap: 12px;
   padding: 10px 14px;
-  background: #0F1118;
+  background: var(--bg-deep);
   border: 1px solid var(--border-strong);
   border-radius: 10px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.55);

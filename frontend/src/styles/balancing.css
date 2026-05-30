@@ -326,7 +326,7 @@
   width: 100%;
   height: 32px;
   padding: 0 28px 0 10px;
-  background-color: #1A1D26;
+  background-color: var(--surface);
   border: 1px solid var(--border);
   border-radius: 6px;
   color: var(--text-primary);
@@ -352,7 +352,7 @@
 .di-s5-link__thresh {
   display: flex;
   align-items: center;
-  background: #1A1D26;
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 6px;
   height: 32px;

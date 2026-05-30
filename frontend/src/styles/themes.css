@@ -25,6 +25,7 @@
 :root,
 :root[data-theme="night-traffic"] {
   --bg-base:        #07080D;
+  --bg-deep:        #0F1118;
   --bg-elevated:    rgba(255, 255, 255, 0.02);
   --bg-hover:       rgba(255, 255, 255, 0.04);
   --surface:        #1A1D26;
@@ -41,9 +42,10 @@
 
 :root[data-theme="sunshine"] {
   --bg-base:        #FAFAF9;
+  --bg-deep:        #F5F5F4;
   --bg-elevated:    #FFFFFF;
   --bg-hover:       rgba(0, 0, 0, 0.03);
-  --surface:        #F5F5F4;
+  --surface:        #FFFFFF;
   --accent:         #2563EB;
   --accent-hover:   #3B82F6;
   --accent-glow:    rgba(37, 99, 235, 0.08);
