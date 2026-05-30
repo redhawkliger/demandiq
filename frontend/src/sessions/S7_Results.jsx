@@ -50,7 +50,7 @@ async function fetchDiagram(payload) {
   })
   if (!res.ok) {
     let detail = `HTTP ${res.status}`
-    try { const j = await res.json(); if (j?.detail) detail = j.detail } catch {}
+    try { const j = await res.json(); if (j?.detail) detail = j.detail } catch { /* body not JSON — keep HTTP-status detail */ }
     throw new Error(detail)
   }
   return await res.json()

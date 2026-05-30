@@ -101,7 +101,7 @@ export default function S8_Export() {
       })
       if (!res.ok) {
         let detail = `HTTP ${res.status}`
-        try { const j = await res.json(); if (j?.detail) detail = j.detail } catch {}
+        try { const j = await res.json(); if (j?.detail) detail = j.detail } catch { /* body not JSON — keep HTTP-status detail */ }
         throw new Error(detail)
       }
       const blob = await res.blob()
@@ -145,7 +145,7 @@ export default function S8_Export() {
       })
       if (!res.ok) {
         let detail = `HTTP ${res.status}`
-        try { const j = await res.json(); if (j?.detail) detail = j.detail } catch {}
+        try { const j = await res.json(); if (j?.detail) detail = j.detail } catch { /* body not JSON — keep HTTP-status detail */ }
         throw new Error(detail)
       }
       const blob = await res.blob()
@@ -200,7 +200,7 @@ export default function S8_Export() {
       })
       if (!res.ok) {
         let detail = `HTTP ${res.status}`
-        try { const j = await res.json(); if (j?.detail) detail = j.detail } catch {}
+        try { const j = await res.json(); if (j?.detail) detail = j.detail } catch { /* body not JSON — keep HTTP-status detail */ }
         throw new Error(detail)
       }
       const data = await res.json()

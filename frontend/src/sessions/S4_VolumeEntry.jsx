@@ -116,7 +116,7 @@ export default function S4_VolumeEntry() {
       const res = await fetch('/api/extract', { method: 'POST', body: fd })
       if (!res.ok) {
         let detail = `HTTP ${res.status}`
-        try { const j = await res.json(); if (j?.detail) detail = j.detail } catch {}
+        try { const j = await res.json(); if (j?.detail) detail = j.detail } catch { /* body not JSON — keep HTTP-status detail */ }
         throw new Error(detail)
       }
       const data = await res.json()

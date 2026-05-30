@@ -15,8 +15,6 @@ import '../styles/forms.css'
 import '../styles/map.css'    // reuses .di-modal, .di-banner, .di-btn-secondary
 import '../styles/approach.css'
 
-const ALL_DIRS = ['EB', 'WB', 'NB', 'SB']
-
 const defaultApproach = () => ({ exists: true, lanes: [{ movement: 'T' }] })
 
 const defaultApproaches = () => ({
