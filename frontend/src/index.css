@@ -1,20 +1,12 @@
+/* Theme color tokens (--bg-*, --accent, --text-*, --border*, --surface) live
+ * in styles/themes.css and are gated on the documentElement's data-theme
+ * attribute. Font tokens + base typography stay here because they don't
+ * theme.
+ */
 :root {
-  /* ── Design tokens ───────────────────────────────────────────────────── */
-  --bg-base:        #07080D;
-  --bg-elevated:    rgba(255, 255, 255, 0.02);
-  --bg-hover:       rgba(255, 255, 255, 0.04);
-  --accent:         #0A84FF;
-  --accent-glow:    rgba(10, 132, 255, 0.06);
-  --text-primary:   #F0F2F8;
-  --text-secondary: #B8BFC9;
-  --text-tertiary:  #9AA3B2;
-  --border:         rgba(255, 255, 255, 0.07);
-  --border-strong:  rgba(255, 255, 255, 0.15);
-
   --font-sans:    'IBM Plex Sans', system-ui, -apple-system, sans-serif;
   --font-display: 'DM Sans', 'IBM Plex Sans', system-ui, sans-serif;
 
-  color-scheme: dark;
   font-family: var(--font-sans);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
