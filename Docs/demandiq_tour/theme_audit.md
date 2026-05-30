@@ -10,6 +10,15 @@
 > (headless verification, 12/12 green in both themes). Pure helpers covered by
 > `themeTiles.test.mjs` + `theme.test.mjs`. Deferred items below under
 > "Audit queue" (#4–#7) remain open.
+>
+> **Phase 6 evidence** (`theme_screens/`, regenerate with
+> `node frontend/tests/e2e/theme_screens.mjs`):
+>
+> | | Night Traffic | Sunshine |
+> |---|---|---|
+> | S1 picker | [s1_night-traffic](theme_screens/s1_night-traffic.png) | [s1_sunshine](theme_screens/s1_sunshine.png) |
+> | Modal | [modal_night-traffic](theme_screens/modal_night-traffic.png) | [modal_sunshine](theme_screens/modal_sunshine.png) |
+> | Map (Alpine) | [map_night-traffic](theme_screens/map_night-traffic.png) | [map_sunshine](theme_screens/map_sunshine.png) |
 
 ## Big finding: theming infrastructure already exists
 
