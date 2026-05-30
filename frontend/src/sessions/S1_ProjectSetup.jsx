@@ -29,15 +29,19 @@ const PERIODS = ['AM', 'PM']
 
 const isFilled = (v) => typeof v === 'string' && v.trim().length > 0
 
-function validate(form) {
-  if (!isFilled(form.name)) return false
-  if (!isFilled(form.client)) return false
-  if (!isFilled(form.analyst)) return false
-  if (!isFilled(form.date)) return false
-  if (!isFilled(form.scenario)) return false
-  if (!form.projectType) return false
-  if (!Array.isArray(form.analysisPeriods) || form.analysisPeriods.length === 0) return false
-  return true
+// Required fields, in display order. Returns the labels still missing so the
+// form can both gate "Save and continue" AND tell the engineer exactly what to
+// fill — the button is never a silent dead-end.
+function missingRequired(form) {
+  const missing = []
+  if (!isFilled(form.name)) missing.push('Project Name')
+  if (!isFilled(form.client)) missing.push('Client / Agency')
+  if (!isFilled(form.analyst)) missing.push('Analyst Initials')
+  if (!isFilled(form.date)) missing.push('Date')
+  if (!isFilled(form.scenario)) missing.push('Scenario Name')
+  if (!form.projectType) missing.push('Project Type')
+  if (!Array.isArray(form.analysisPeriods) || form.analysisPeriods.length === 0) missing.push('Analysis Period')
+  return missing
 }
 
 export default function S1_ProjectSetup() {
@@ -72,34 +76,42 @@ export default function S1_ProjectSetup() {
       return { ...f, analysisPeriods: PERIODS.filter((x) => set.has(x)) }
     })
 
-  const isValid = validate(form)
+  // Only surface validation errors AFTER the engineer tries to continue, so the
+  // form isn't pre-littered with red on first load.
+  const [attempted, setAttempted] = useState(false)
+  const missing = missingRequired(form)
+  const isValid = missing.length === 0
 
   const handleSubmit = (e) => {
     e.preventDefault()
-    if (!isValid) return
+    if (!isValid) { setAttempted(true); return } // show what's missing; don't navigate
     if (saveTimer.current) clearTimeout(saveTimer.current)
     setProjectMeta(form) // flush, don't wait for the debounce window
     navigate('/map')
   }
 
   // Small render helper — keeps each field one line of JSX. Not exported.
-  const textField = (label, key, required, opts = {}) => (
-    <div className="di-field">
-      <label className="di-label" htmlFor={`f-${key}`}>
-        {label}
-        {required && <span className="di-required">*</span>}
-      </label>
-      <input
-        id={`f-${key}`}
-        className="di-input"
-        type={opts.type || 'text'}
-        value={form[key] ?? ''}
-        placeholder={opts.placeholder}
-        autoComplete="off"
-        onChange={(e) => update(key, e.target.value)}
-      />
-    </div>
-  )
+  const textField = (label, key, required, opts = {}) => {
+    const invalid = attempted && required && !isFilled(form[key])
+    return (
+      <div className="di-field">
+        <label className="di-label" htmlFor={`f-${key}`}>
+          {label}
+          {required && <span className="di-required">*</span>}
+        </label>
+        <input
+          id={`f-${key}`}
+          className={`di-input${invalid ? ' di-input--error' : ''}`}
+          type={opts.type || 'text'}
+          value={form[key] ?? ''}
+          placeholder={opts.placeholder}
+          autoComplete="off"
+          aria-invalid={invalid || undefined}
+          onChange={(e) => update(key, e.target.value)}
+        />
+      </div>
+    )
+  }
 
   return (
     <form className="di-page" onSubmit={handleSubmit} noValidate>
@@ -147,6 +159,9 @@ export default function S1_ProjectSetup() {
               )
             })}
           </div>
+          {attempted && !form.projectType && (
+            <span className="di-field-error">Select a project type</span>
+          )}
         </div>
 
         <div className="di-field">
@@ -174,6 +189,9 @@ export default function S1_ProjectSetup() {
               </span>
             )}
           </div>
+          {attempted && form.analysisPeriods.length === 0 && (
+            <span className="di-field-error">Select at least one analysis period</span>
+          )}
         </div>
 
         <div className="di-field">
@@ -202,8 +220,14 @@ export default function S1_ProjectSetup() {
           </button>
         </div>
 
-        <div className="di-actions">
-          <button type="submit" className="di-btn-primary" disabled={!isValid}>
+        <div className="di-actions di-actions--validated">
+          {attempted && !isValid && (
+            <div className="di-form-error" role="alert">
+              Fill in the required field{missing.length === 1 ? '' : 's'} to continue:{' '}
+              {missing.join(', ')}.
+            </div>
+          )}
+          <button type="submit" className="di-btn-primary">
             Save and continue →
           </button>
         </div>

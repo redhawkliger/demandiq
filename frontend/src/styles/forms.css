@@ -139,6 +139,35 @@
   margin-top: 16px;
 }
 
+/* ── Validation feedback (Save and continue is always clickable; on an
+   incomplete form it reveals what's missing instead of silently disabling). ── */
+.di-actions--validated {
+  align-items: center;
+  gap: 16px;
+}
+/* Error red is a semantic constant (theme-independent) per the theme audit. */
+.di-input--error,
+.di-input--error:hover {
+  border-color: #FF6B6B;
+}
+.di-input--error:focus {
+  border-color: #FF6B6B;
+  box-shadow: 0 0 0 3px rgba(255, 107, 107, 0.12);
+}
+.di-field-error {
+  font-size: 11px;
+  color: #FF8B8B;
+  margin-top: 2px;
+}
+.di-form-error {
+  margin-right: auto;
+  max-width: 60%;
+  font-size: 12px;
+  color: #FF8B8B;
+  text-align: left;
+  line-height: 1.4;
+}
+
 .di-btn-primary {
   height: 44px;
   padding: 0 24px;
