@@ -35,6 +35,7 @@ function groupedDirs(corridorDir) {
 export default function S3_ApproachConfig() {
   const navigate = useNavigate()
   const snap = useSyncExternalStore(subscribe, getSnapshot, () => ({}))
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- store-derived; a fresh [] ref only when empty, useMemo isn't worth it
   const intersections = snap.intersections || []
   const corridorDir = snap.analysis?.corridorDir ?? 'EW'
 
@@ -60,6 +61,7 @@ export default function S3_ApproachConfig() {
   useEffect(() => {
     // If active id was removed, snap to the first
     if (!intersections.find((it) => it.id === activeId)) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- snap active id to the first when the current one is deleted
       setActiveId(intersections[0]?.id ?? null)
     }
   }, [intersections, activeId])

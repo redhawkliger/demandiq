@@ -43,6 +43,7 @@ export default function DiagramCard({
   // Local draft; commit on blur / Enter so we re-render the PNG once per edit
   // (not on every keystroke). Re-sync if the stored note changes externally.
   const [draft, setDraft] = useState(note)
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- mirror the stored note into the local draft when it changes externally
   useEffect(() => { setDraft(note) }, [note])
 
   const commit = () => {

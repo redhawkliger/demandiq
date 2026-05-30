@@ -6,6 +6,7 @@ const MVTS = ['U', 'L', 'T', 'R']
 const DIR_ARROWS = { EB: 'EB →', WB: '← WB', NB: 'NB ↑', SB: 'SB ↓' }
 
 // Compute which of {U, L, T, R} are active for an approach, based on its lanes.
+// eslint-disable-next-line react-refresh/only-export-components -- pure helper co-located with its sole consumer; HMR-only rule
 export function activeMovements(approach) {
   const out = { U: false, L: false, T: false, R: false }
   if (!approach || approach.exists === false) return out

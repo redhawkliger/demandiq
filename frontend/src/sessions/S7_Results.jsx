@@ -82,6 +82,7 @@ export default function S7_Results() {
   // (which mints a new timestamp) invalidates everything cleanly.
   const [diagrams, setDiagrams] = useState(() => new Map())
   const diagramsRef = useRef(diagrams)
+  // eslint-disable-next-line react-hooks/refs -- latest-value ref so stable callbacks read the current map without re-creation; idempotent
   diagramsRef.current = diagrams
 
   const updateEntry = (key, entry) => {

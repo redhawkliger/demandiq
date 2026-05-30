@@ -19,6 +19,7 @@ export default function MovementPickerModal({
   const [selected, setSelected] = useState(current)
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reset selection to current each time the picker opens
     if (open) setSelected(current)
   }, [open, current])
 

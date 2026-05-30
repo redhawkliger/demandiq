@@ -123,9 +123,12 @@ const isDropRow = (r) => r.AM.delta < 0 || r.PM.delta < 0
 export default function S7_ReviewDrops() {
   const navigate = useNavigate()
   const snap = useSyncExternalStore(subscribe, getSnapshot, () => ({}))
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- store-derived; a fresh [] ref only when empty, useMemo isn't worth it
   const intersections = snap.intersections || []
   const lastRun = snap.analysis?.lastRun ?? null
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- store-derived; fresh ref only when absent, useMemo isn't worth it
   const overrides = snap.balancing?.overrides ?? { AM: {}, PM: {} }
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- store-derived; a fresh [] ref only when empty, useMemo isn't worth it
   const links = snap.links || []
   const project = snap.project || {}
 
@@ -163,6 +166,7 @@ export default function S7_ReviewDrops() {
   // Intersection filter (chip multi-select)
   const [selectedInts, setSelectedInts] = useState(() => new Set(intersections.map((it) => it.num)))
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reset the intersection filter to all when the corridor changes
     setSelectedInts(new Set(intersections.map((it) => it.num)))
   }, [intersections])
 
@@ -625,6 +629,7 @@ function OverrideInput({ period, intNum, movement, balanced, currentOverride }) 
 
   // Re-sync from store when external changes happen (Clamp all, Reset all, etc.)
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- re-sync draft when the store value changes (Clamp all / Reset all)
     setDraft(String(currentOverride != null ? currentOverride : balanced))
   }, [currentOverride, balanced])
 

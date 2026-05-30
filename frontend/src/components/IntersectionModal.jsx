@@ -42,6 +42,7 @@ export default function IntersectionModal({
   // Reset whenever a new modal opens
   useEffect(() => {
     if (!open) return
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reset all fields each time the modal (re)opens
     setName(initial?.name ?? '')
     setControl(initial?.control ?? 'Signalized')
     setLegs(initial?.legs ?? '4-leg')
@@ -53,6 +54,7 @@ export default function IntersectionModal({
   // Pre-fill name from reverse geocode only if user hasn't typed
   useEffect(() => {
     if (!open || mode !== 'add' || userTouchedName) return
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- one-shot reverse-geocode name prefill until the user types
     if (geocodeName && !name) setName(geocodeName)
   }, [geocodeName, open, mode, userTouchedName, name])
 

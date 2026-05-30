@@ -88,6 +88,7 @@ const MOVEMENT_SPECS = {
   ULTR: { vb: '0 0 80 36', arrows: [['U', 10], ['L', 28], ['T', 46], ['R', 64]] },
 }
 
+// eslint-disable-next-line react-refresh/only-export-components -- static lookup co-located with its sole consumer; HMR-only rule
 export const MOVEMENT_CODES = Object.keys(MOVEMENT_SPECS)
 
 export default function MovementSvg({ code, height = 28, color }) {
