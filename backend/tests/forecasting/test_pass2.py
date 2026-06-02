@@ -107,3 +107,61 @@ def test_real_full_pipeline():
     assert 1 in res["balanced"]
     for v in res["balanced"][1].values():
         assert v % 5 == 0
+
+
+def _build_2030_from_real(dst_dir, growth):
+    """Derive a synthetic horizon network from the real base file: same geometry
+    and link_ids, every period flow scaled by `growth`. Lets the full pipeline
+    run on REAL geometry with non-identity growth (we have no real 2030 file)."""
+    import geopandas as gpd
+    d = gpd.read_file(REAL_SHP)
+    for c in [c for c in d.columns if c.endswith("_flow")]:
+        d[c] = d[c] * growth
+    path = dst_dir / "hwyLoad_2030.shp"
+    d.to_file(path)
+    return path
+
+
+@pytest.mark.skipif(not REAL_SHP.exists(),
+                    reason="real SANDAG hwyLoad.shp not present (local-only)")
+def test_real_growth_full_pipeline(tmp_path):
+    from forecasting.ingest import ingest_networks
+    from forecasting.matcher import match_network_to_legs
+    from forecasting.refinement import refine_corridor
+    from forecasting.pass1 import forecast_corridor
+    from forecasting.contract import Period
+
+    GROWTH = 1.25
+    horizon = _build_2030_from_real(tmp_path, GROWTH)
+    lat, lng = 32.624067, -116.959736                      # DISCOVERY FALLS node
+    pts = [{"num": 1, "lat": lat, "lng": lng}]
+
+    layers = ingest_networks(pts, [
+        {"role": "base", "scenario_year": 2025, "path": str(REAL_SHP)},
+        {"role": "horizon", "scenario_year": 2030, "path": str(horizon)},
+    ])
+    mr = match_network_to_legs(pts, layers["base"])
+    counts = {1: {m: 100 for m in _ALL12}}
+    rr = refine_corridor(mr, layers["base"], layers["horizon"], counts, Period.AM)
+
+    # Uniform ×1.25 scaling → every bound leg's model growth factor is ~1.25
+    # (and refined inbound ~125 = count × growth), proving real growth — not
+    # identity — flows through refinement.
+    [r] = rr
+    bound = [d for d in ("NB", "SB", "EB", "WB") if r["approaches"][d]["status"] == "bound"]
+    assert bound, "expected at least one bound leg on the real node"
+    grew = False
+    for d in bound:
+        gf = r["approaches"][d]["inbound"].get("growth_factor")
+        if gf is not None:                                  # None = held-flat (Mb=0)
+            sub = r["approaches"][d]["inbound"]
+            assert gf == pytest.approx(GROWTH, abs=0.01)
+            # refined = approach-total count (L+T+R) × growth.
+            assert sub["refined"] == pytest.approx(sub["count_base"] * GROWTH, abs=1.0)
+            grew = True
+    assert grew, "expected at least one leg with a real (non-zero) model base"
+
+    # Full pipeline → future TMCs exceed the flat base count of 100.
+    futures, _ = forecast_corridor(rr, counts)
+    res = balance_future(futures, [], coords={1: {"lat": lat, "lng": lng}})
+    assert max(res["balanced"][1].values()) > 100
