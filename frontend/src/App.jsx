@@ -10,6 +10,10 @@ import S6_RunAnalysis from './sessions/S6_RunAnalysis'
 import S7_ReviewDrops from './sessions/S7_ReviewDrops'
 import S7_Results from './sessions/S7_Results'
 import S8_Export from './sessions/S8_Export'
+import F1_HorizonNetwork from './sessions/F1_HorizonNetwork'
+import F2_NetworkMatch from './sessions/F2_NetworkMatch'
+import F3_RunForecast from './sessions/F3_RunForecast'
+import F4_FutureResults from './sessions/F4_FutureResults'
 
 export default function App() {
   return (
@@ -29,6 +33,10 @@ export default function App() {
               <Route path="/review-drops" element={<S7_ReviewDrops />} />
               <Route path="/results" element={<S7_Results />} />
               <Route path="/export" element={<S8_Export />} />
+              <Route path="/forecast/setup" element={<F1_HorizonNetwork />} />
+              <Route path="/forecast/match" element={<F2_NetworkMatch />} />
+              <Route path="/forecast/run" element={<F3_RunForecast />} />
+              <Route path="/forecast/results" element={<F4_FutureResults />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           </main>

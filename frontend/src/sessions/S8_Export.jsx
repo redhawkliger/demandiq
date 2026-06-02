@@ -15,6 +15,7 @@ import { convergenceLabel } from '../lib/convergenceLabel'
 import '../styles/forms.css'
 import '../styles/map.css'        // .di-modal*, .di-banner, .di-btn-primary, .di-btn-secondary
 import '../styles/export.css'
+import '../styles/forecasting.css' // .di-btn-amber for the Continue to Forecasting CTA
 
 const GRID_VIEWS = ['combined', 'balanced', 'unbalanced', 'delta']
 const GRID_PERIODS = ['Both', 'AM', 'PM']
@@ -484,9 +485,19 @@ export default function S8_Export() {
         >
           Start new project
         </button>
-        <span className="di-s8__done">
-          🎉 Project complete. Don&apos;t forget to download your work before starting new.
-        </span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginLeft: 'auto' }}>
+          <span className="di-s8__done">
+            🎉 Existing conditions complete — export before continuing.
+          </span>
+          <button
+            type="button"
+            className="di-btn-amber"
+            onClick={() => navigate('/forecast/setup')}
+            title="Forecast future conditions from these balanced volumes"
+          >
+            Continue to Forecasting →
+          </button>
+        </div>
       </footer>
 
       {/* ── Confirm modal ─────────────────────────────────────────── */}
