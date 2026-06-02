@@ -123,6 +123,17 @@ def test_no_gap_when_clean():
     assert _run()["corridor"]["gap_flag"] is False
 
 
+# ── Per-link segment volumes (additive — fed to the Excel per-link breakdown) ──
+def test_links_carry_segment_volumes():
+    lk = _run()["links"][0]
+    # EB outflow 1000 + WB approach 800 = 1800 existing; ×1.5 = 2700 future.
+    assert lk["existing_vol"] == pytest.approx(1800.0)
+    assert lk["future_vol"] == pytest.approx(2700.0)
+    # vol × length(1.0 mi) reconciles with the VMT fields (no double-count).
+    assert lk["existing_vmt"] == pytest.approx(lk["existing_vol"] * lk["length_mi"])
+    assert lk["future_vmt"] == pytest.approx(lk["future_vol"] * lk["length_mi"])
+
+
 # ── Network rollup (link → corridor → network) ────────────────────────────────
 def test_network_rollup_equals_corridor():
     out = _run()

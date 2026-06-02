@@ -188,6 +188,7 @@ def corridor_vmt(corridor_links, coords, match_results, base_layer, horizon_laye
         net["length_mi"] += length
         links_out.append({
             "from_num": a, "to_num": b, "length_mi": round(length, 4),
+            "existing_vol": round(ex_vol, 1), "future_vol": round(fu_vol, 1),
             "existing_vmt": round(ex_vmt, 1), "future_vmt": round(fu_vmt, 1),
             "delta": round(fu_vmt - ex_vmt, 1), "chain_link_ids": chain_ids, "held": held,
         })
