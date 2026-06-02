@@ -73,13 +73,24 @@ def test_ingest_match_requires_networks():
     assert r.status_code == 400
 
 
-def test_ingest_match_rejects_path_traversal():
+def test_ingest_match_sanitizes_path_to_data_dir(monkeypatch):
+    # A traversal attempt must be stripped to a basename under data/sandag — the
+    # client can never read outside the server's network data dir.
+    captured = {}
+
+    def _capture(intersections, networks, **kw):
+        captured["networks"] = networks
+        return {"base": NetworkLayer(region="SANDAG", source_crs_epsg=2230,
+                                     crs_epsg=4326, scenario_year=2025, links=[])}
+
+    monkeypatch.setattr("forecasting.api.ingest_networks", _capture)
     r = client.post("/forecast/ingest-match", json={
         "intersections": [INTX],
-        "networks": [{"role": "base", "scenario_year": 2025, "path": "/etc/passwd"}],
+        "networks": [{"role": "base", "scenario_year": 2025, "path": "../../../etc/passwd"}],
     })
-    assert r.status_code == 400
-    assert "must be under" in r.json()["detail"]
+    assert r.status_code == 200
+    p = captured["networks"][0]["path"].replace("\\", "/")
+    assert p.endswith("/data/sandag/passwd")
 
 
 def test_ingest_match_503_without_geo(monkeypatch):

@@ -71,14 +71,24 @@ def ingest_match(payload: dict):
     if not isinstance(networks, list) or not networks:
         raise HTTPException(status_code=400, detail="networks must be a non-empty list")
 
-    # Security: an explicit shapefile path must resolve under the server's
-    # SANDAG data dir — never let a client read arbitrary server files.
-    data_root = str(SANDAG_DATA_DIR.resolve())
+    # Resolve each network file to a BASENAME under the server's SANDAG data dir.
+    # Clients send a filename (e.g. "hwyLoad.shp"); directory parts are stripped,
+    # so a path can never escape data/sandag and resolution is independent of the
+    # server's working directory.
+    data_root = SANDAG_DATA_DIR.resolve()
+    norm_networks = []
     for n in networks:
-        path = n.get("path") if isinstance(n, dict) else None
-        if path is not None and not str(Path(path).resolve()).startswith(data_root):
-            raise HTTPException(status_code=400,
-                                detail=f"network path must be under {data_root}")
+        if not isinstance(n, dict):
+            raise HTTPException(status_code=400, detail="each network must be an object")
+        spec = dict(n)
+        raw = n.get("path")
+        if raw is not None:
+            resolved = (data_root / Path(str(raw)).name).resolve()
+            if not str(resolved).startswith(str(data_root)):
+                raise HTTPException(status_code=400,
+                                    detail=f"network path must resolve under {data_root}")
+            spec["path"] = str(resolved)
+        norm_networks.append(spec)
 
     try:
         radius = float(payload.get("filter_radius_ft", 300))
@@ -86,7 +96,7 @@ def ingest_match(payload: dict):
         raise HTTPException(status_code=400, detail="filter_radius_ft must be numeric")
 
     try:
-        layers = ingest_networks(intersections, networks, filter_radius_ft=radius)
+        layers = ingest_networks(intersections, norm_networks, filter_radius_ft=radius)
     except ModuleNotFoundError:
         raise HTTPException(
             status_code=503,
