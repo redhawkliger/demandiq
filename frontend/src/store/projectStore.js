@@ -810,6 +810,44 @@ export function setResultsView(partial) {
   _emit()
 }
 
+// ── Forecasting (Method 1 / NCHRP 765) — future-conditions slice ──────────────
+// Additive slice persisted with the rest of the project (same localStorage key).
+// Built up across F1–F4:
+//   forecasting: {
+//     baseYear, horizonYear,
+//     networks: [{ role:'base'|'horizon', scenarioYear, path }],   // F1
+//     layers:  { base, horizon },   // F2 — filtered NetworkLayers from /ingest-match
+//     matches: [...],               // F2 — match results, edited in review
+//     settings:{ method, peakHourFactor, manualTargets },          // F3
+//     results: { AM:{...}, PM:{...} },                             // F4
+//   }
+// NOTE: layers/matches/results go stale if intersections change after a pull;
+// the F2 re-pull is the reset path (wired when F2 is built).
+export function getForecasting() {
+  return getSnapshot().forecasting ?? null
+}
+
+export function setForecasting(partial) {
+  if (!_initialized) _initSnapshot()
+  const cur = _snapshot.forecasting ?? {}
+  _snapshot = { ..._snapshot, forecasting: { ...cur, ...partial } }
+  _persist()
+  _emit()
+}
+
+// Gate for the whole forecasting phase: it grows the EXISTING balanced TMCs (the
+// count C the engine refines against), so it's unreachable until a run produced
+// balanced volumes. Mirrors S8's hasAnyBalanced guard — the true "analysis done"
+// signal, robust to lastRun being cleared by reconcileDependents.
+export function isExistingAnalysisDone() {
+  const ints = getSnapshot().intersections ?? []
+  return ints.some(
+    (it) =>
+      (it.balanced?.AM && Object.keys(it.balanced.AM).length > 0) ||
+      (it.balanced?.PM && Object.keys(it.balanced.PM).length > 0)
+  )
+}
+
 // ── Original API (preserved) ──────────────────────────────────────────────────
 export function loadProject() {
   const snap = getSnapshot()
