@@ -430,3 +430,76 @@
 .di-fc-prov__leg:first-of-type { border-top: none; }
 .di-fc-prov__leg strong { color: var(--text-primary); }
 .di-fc-prov__flag { color: var(--signal-amber); }
+
+/* ── F4 corridor VMT — green existing / amber future ─────────────────────── */
+.di-fc-vmt {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 14px;
+  margin-bottom: 14px;
+  background: var(--bg-elevated);
+}
+.di-fc-vmt__head {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-tertiary);
+  margin-bottom: 8px;
+}
+.di-fc-vmt__basis {
+  margin-left: 6px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--bg-hover);
+  color: var(--text-secondary);
+  letter-spacing: 0;
+  text-transform: none;
+}
+.di-fc-vmt__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 10px;
+  font-variant-numeric: tabular-nums;
+}
+.di-fc-vmt__row--daily {
+  margin-top: 6px;
+  font-size: 13px;
+}
+.di-fc-vmt__ex {
+  color: var(--signal-green);
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 18px;
+}
+.di-fc-vmt__fu {
+  color: var(--signal-amber);
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 18px;
+}
+.di-fc-vmt__row--daily .di-fc-vmt__ex,
+.di-fc-vmt__row--daily .di-fc-vmt__fu { font-size: 14px; }
+.di-fc-vmt__ex em,
+.di-fc-vmt__fu em {
+  font-style: normal;
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--text-tertiary);
+}
+.di-fc-vmt__arrow { color: var(--text-tertiary); }
+.di-fc-vmt__delta { color: var(--text-secondary); font-size: 13px; }
+.di-fc-vmt__tag {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-tertiary);
+}
+.di-fc-vmt__chip {
+  margin-top: 10px;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  line-height: 1.6;
+}
+.di-fc-vmt__warn { color: var(--signal-amber); }

@@ -148,6 +148,9 @@ export default function F4_FutureResults() {
         <Provenance refinement={refinement} />
       )}
 
+      {/* Corridor VMT — green existing / amber future, unit + basis on its face. */}
+      <VmtPanel vmt={results[effPeriod]?.vmt} />
+
       {/* Controls */}
       <div className="di-fc-resctl">
         <div className="di-pill-group">
@@ -220,6 +223,48 @@ export default function F4_FutureResults() {
         >
           Continue to export →
         </button>
+      </div>
+    </div>
+  )
+}
+
+function VmtPanel({ vmt }) {
+  const c = vmt?.corridor
+  if (!c) return null
+  const fmt = (n) => (n == null ? '—' : Math.round(n).toLocaleString())
+  const sign = (n) => (n >= 0 ? '+' : '')
+  const pct = c.existing_vmt > 0 ? Math.round((100 * c.delta) / c.existing_vmt) : null
+  const hasDaily = c.daily_existing_vmt != null
+  const star = c.daily_estimated ? ' *' : ''
+  return (
+    <div className="di-fc-vmt">
+      <div className="di-fc-vmt__head">
+        Corridor VMT <span className="di-fc-vmt__basis">peak hr</span>
+      </div>
+      <div className="di-fc-vmt__row">
+        <span className="di-fc-vmt__ex">{fmt(c.existing_vmt)} <em>veh-mi</em></span>
+        <span className="di-fc-vmt__arrow">→</span>
+        <span className="di-fc-vmt__fu">{fmt(c.future_vmt)} <em>veh-mi · peak hr</em></span>
+        <span className="di-fc-vmt__delta">
+          {sign(c.delta)}{fmt(c.delta)}{pct != null ? ` · ${sign(pct)}${pct}%` : ''}
+        </span>
+      </div>
+      {hasDaily && (
+        <div className="di-fc-vmt__row di-fc-vmt__row--daily">
+          <span className="di-fc-vmt__tag">daily{star}</span>
+          <span className="di-fc-vmt__ex">{fmt(c.daily_existing_vmt)}</span>
+          <span className="di-fc-vmt__arrow">→</span>
+          <span className="di-fc-vmt__fu">{fmt(c.daily_future_vmt)} <em>veh-mi · daily{star}</em></span>
+          <span className="di-fc-vmt__delta">{sign(c.daily_delta)}{fmt(c.daily_delta)}</span>
+        </div>
+      )}
+      <div className="di-fc-vmt__chip">
+        {c.corridor_length_mi} mi · {c.link_count} link{c.link_count === 1 ? '' : 's'} ·
+        {' '}forecast volumes × model link length
+        {c.gap_flag && <span className="di-fc-vmt__warn"> · ⚠ contains held segments</span>}
+        {c.daily_estimated && (
+          <span className="di-fc-vmt__warn"> · * daily estimated, expansion factor {c.expansion_factor}</span>
+        )}
       </div>
     </div>
   )
