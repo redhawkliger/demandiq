@@ -29,6 +29,7 @@ from forecasting.matcher import match_network_to_legs
 from forecasting.refinement import refine_corridor
 from forecasting.pass1 import forecast_corridor
 from forecasting.pass2 import balance_future
+from forecasting.vmt import corridor_vmt
 
 router = APIRouter()
 
@@ -146,6 +147,15 @@ def run_forecast(payload: dict):
     manual = payload.get("manual_targets")
     manual_targets = {int(k): v for k, v in manual.items()} if manual else None
 
+    # VMT peak→daily expansion factor — SEPARATE from the refinement K. Optional;
+    # only used when the model carries no daily flows (else daily is data-derived).
+    vmt_factor = payload.get("vmt_expansion_factor")
+    if vmt_factor is not None:
+        try:
+            vmt_factor = float(vmt_factor)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="vmt_expansion_factor must be numeric")
+
     out = {}
     for p in periods:
         if p not in ("AM", "PM"):
@@ -157,11 +167,15 @@ def run_forecast(payload: dict):
                                  peak_hour_factor=peak_hour_factor, method=refine_method)
             futures, p1_meta = forecast_corridor(rr, tmcs, manual_targets=manual_targets)
             p2 = balance_future(futures, links, coords=coords, method=method)
+            vmt = corridor_vmt(links, coords, matches, base_layer, horizon_layer,
+                               tmcs, p2["balanced"], rr, period,
+                               expansion_factor=vmt_factor)
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
         out[p] = {
             "refinement": rr,
             "pass1": {"futures": _str_keys(futures), "meta": _str_keys(p1_meta)},
             "pass2": _serialize_pass2(p2),
+            "vmt": vmt,
         }
     return out

@@ -159,6 +159,9 @@ def test_run_happy_path():
         assert v % 5 == 0
     # NB approach grew ~1.5× from the base count of 650.
     assert sum(balanced[m] for m in ("NBL", "NBT", "NBR")) > 900
+    # VMT rides along in the run response (no corridor links here → empty corridor).
+    assert am["vmt"]["unit"] == "veh-mi"
+    assert am["vmt"]["corridor"]["link_count"] == 0
 
 
 # ── Integration: real ingest-match end to end (gated) ─────────────────────────
