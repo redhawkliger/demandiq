@@ -480,13 +480,187 @@ def _write_raw_movements(wb, intersections, overrides):
         ws.column_dimensions[get_column_letter(c)].width = 12
 
 
+# ── Tab 4: Corridor VMT (forecasting only) ────────────────────────────────────
+# Numeric formats for the VMT sheet.
+VMT_NUM = '#,##0'      # veh-mi / volumes — whole, thousands-separated
+LEN_NUM = '0.000'      # miles — 3 decimals
+
+
+def _basis_label(b):
+    if b == 'peak_hour':
+        return 'Peak hour'
+    if b == 'daily':
+        return 'Daily'
+    return b or MISSING
+
+
+def _write_corridor_vmt(wb, project_state):
+    """Forecasting deliverable: per-period corridor VMT, read VERBATIM from the
+    /forecast/run response folded into project_state['forecasting']['results'].
+
+    Reuses the SAME vmt object the F4 panel and provenance chip render, so the
+    workbook and the in-app chip can never disagree. The sheet is OMITTED
+    silently when forecasting results are absent — non-forecasting exports keep
+    their three-tab schema untouched.
+
+    Per period (AM/PM, in that order, only those present):
+      • corridor summary (existing / future / Δ VMT, basis, length, link count)
+      • daily row when a daily figure resolved (asterisk + note only when it was
+        engineer-factor-estimated; data-derived daily carries neither)
+      • per-link breakdown (segment, length, volumes, VMT, Δ, held)
+      • a network rollup row
+    Trust-critical caveats — the held-segment gap note and the daily-estimated
+    note — are read from the gap_flag / daily_estimated fields of the same object.
+    """
+    forecasting = project_state.get('forecasting') or {}
+    results = forecasting.get('results') or {}
+    # Only periods that actually carry a vmt object, in canonical order.
+    periods = [p for p in ('AM', 'PM') if (results.get(p) or {}).get('vmt')]
+    if not periods:
+        return  # No forecasting results → omit the sheet entirely.
+
+    ws = wb.create_sheet('Corridor VMT')
+    NCOLS = 9
+    link_headers = ['From', 'To', 'Length (mi)', 'Existing vol', 'Future vol',
+                    'Existing VMT', 'Future VMT', 'Δ VMT', 'Held']
+
+    def _merge_banner(row, text, style=_style_header):
+        c = ws.cell(row=row, column=1, value=text)
+        style(c)
+        for cc in range(1, NCOLS + 1):
+            ws.cell(row=row, column=cc).border = BORDER
+            if cc > 1 and style is _style_header:
+                ws.cell(row=row, column=cc).fill = HDR_FILL
+        ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=NCOLS)
+
+    r = 1
+    for p in periods:
+        vmt = results[p]['vmt']
+        c = vmt.get('corridor') or {}
+        net = vmt.get('network') or c
+        links = vmt.get('links') or []
+
+        # ── Period banner ───────────────────────────────────────────────
+        _merge_banner(r, f'{p} Peak — Corridor VMT')
+        r += 1
+
+        # ── Corridor summary (label | value) ────────────────────────────
+        summary = [
+            ('Existing VMT (veh-mi)', c.get('existing_vmt'), VMT_NUM),
+            ('Future VMT (veh-mi)',   c.get('future_vmt'),   VMT_NUM),
+            ('Δ VMT (veh-mi)',        c.get('delta'),        '+#,##0;-#,##0;0'),
+            ('Basis',                 _basis_label(c.get('basis')), None),
+            ('Corridor length (mi)',  c.get('corridor_length_mi'), LEN_NUM),
+            ('Links',                 c.get('link_count'),   '0'),
+        ]
+        for label, value, fmt in summary:
+            _style_subheader(ws.cell(row=r, column=1, value=label))
+            vc = ws.cell(row=r, column=2, value=value)
+            _style_data(vc, align=LEFT, fmt=fmt if isinstance(value, (int, float)) else None)
+            ws.merge_cells(start_row=r, start_column=2, end_row=r, end_column=NCOLS)
+            r += 1
+
+        # ── Daily row — only when a daily figure resolved ───────────────
+        if c.get('daily_existing_vmt') is not None:
+            estimated = bool(c.get('daily_estimated'))
+            daily_rows = [
+                ('Daily existing VMT (veh-mi)', c.get('daily_existing_vmt')),
+                ('Daily future VMT (veh-mi)',   c.get('daily_future_vmt')),
+                ('Daily Δ VMT (veh-mi)',        c.get('daily_delta')),
+            ]
+            for i, (label, value) in enumerate(daily_rows):
+                _style_subheader(ws.cell(row=r, column=1, value=label))
+                # Asterisk rides ONLY on the engineer-factor-estimated case,
+                # matching the F4 panel; data-derived daily is bare.
+                if estimated and value is not None:
+                    vc = ws.cell(row=r, column=2, value=f'{value:,.0f}*')
+                    _style_data(vc, align=LEFT)
+                else:
+                    vc = ws.cell(row=r, column=2, value=value)
+                    _style_data(vc, align=LEFT,
+                                fmt=VMT_NUM if isinstance(value, (int, float)) else None)
+                ws.merge_cells(start_row=r, start_column=2, end_row=r, end_column=NCOLS)
+                r += 1
+
+        # ── Trust-critical caveats ──────────────────────────────────────
+        if c.get('gap_flag'):
+            cell = ws.cell(row=r, column=1, value='⚠ Contains held segments')
+            _style_data(cell, align=LEFT)
+            cell.font = NEG_FONT
+            cell.fill = DROP_FILL
+            ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=NCOLS)
+            r += 1
+        if c.get('daily_estimated'):
+            factor = c.get('expansion_factor')
+            note = f'Daily VMT estimated from peak-hour, expansion factor {factor}'
+            cell = ws.cell(row=r, column=1, value=note)
+            _style_data(cell, align=LEFT)
+            cell.fill = OVR_FILL
+            ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=NCOLS)
+            r += 1
+
+        r += 1  # spacer
+
+        # ── Per-link breakdown ──────────────────────────────────────────
+        for col, label in enumerate(link_headers, start=1):
+            _style_header(ws.cell(row=r, column=col, value=label))
+        r += 1
+        for lk in links:
+            _style_data(ws.cell(row=r, column=1, value=lk.get('from_num')), fmt='0')
+            _style_data(ws.cell(row=r, column=2, value=lk.get('to_num')), fmt='0')
+            _style_data(ws.cell(row=r, column=3, value=lk.get('length_mi')), fmt=LEN_NUM)
+            _style_data(ws.cell(row=r, column=4, value=lk.get('existing_vol')), fmt=VMT_NUM)
+            _style_data(ws.cell(row=r, column=5, value=lk.get('future_vol')), fmt=VMT_NUM)
+            _style_data(ws.cell(row=r, column=6, value=lk.get('existing_vmt')), fmt=VMT_NUM)
+            _style_data(ws.cell(row=r, column=7, value=lk.get('future_vmt')), fmt=VMT_NUM)
+            dcell = ws.cell(row=r, column=8, value=lk.get('delta'))
+            _style_data(dcell, fmt='+#,##0;-#,##0;0')
+            if isinstance(lk.get('delta'), (int, float)) and lk['delta'] < 0:
+                dcell.font = NEG_FONT
+            held = lk.get('held')
+            hcell = ws.cell(row=r, column=9, value='Y' if held else '')
+            _style_data(hcell)
+            if held:
+                for cc in range(1, NCOLS + 1):
+                    ws.cell(row=r, column=cc).fill = DROP_FILL
+            r += 1
+
+        # ── Network rollup row ──────────────────────────────────────────
+        _style_subheader(ws.cell(row=r, column=1, value='Network total'))
+        ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=2)
+        ws.cell(row=r, column=2).border = BORDER
+        ws.cell(row=r, column=2).fill = SUB_FILL
+        nrow = [
+            (3, net.get('corridor_length_mi'), LEN_NUM),
+            (4, None, None), (5, None, None),
+            (6, net.get('existing_vmt'), VMT_NUM),
+            (7, net.get('future_vmt'), VMT_NUM),
+            (8, net.get('delta'), '+#,##0;-#,##0;0'),
+            (9, None, None),
+        ]
+        for col, value, fmt in nrow:
+            tcell = ws.cell(row=r, column=col, value=value)
+            _style_subheader(tcell)
+            if fmt and isinstance(value, (int, float)):
+                tcell.number_format = fmt
+        r += 2  # spacer before the next period
+
+    # Column widths.
+    ws.column_dimensions['A'].width = 26
+    for col in range(2, NCOLS + 1):
+        ws.column_dimensions[get_column_letter(col)].width = 14
+    ws.freeze_panes = 'A2'
+
+
 # ── Public API ───────────────────────────────────────────────────────────────
 def build_workbook(project_state):
-    """Build the 3-tab workbook from the project snapshot.
+    """Build the workbook from the project snapshot.
 
     Returns: bytes (.xlsx data). Tab order: Provenance, Combined View, Raw
-    Movements. No per-intersection tabs; no legacy convergence/adjustments
-    sheets (those reads were dead in the NCHRP era).
+    Movements, then a "Corridor VMT" tab ONLY when the project carries
+    forecasting results (omitted otherwise — non-forecasting exports keep the
+    three-tab schema). No per-intersection tabs; no legacy convergence/
+    adjustments sheets (those reads were dead in the NCHRP era).
     """
     intersections = project_state.get('intersections') or []
     overrides = ((project_state.get('balancing') or {}).get('overrides')) or {'AM': {}, 'PM': {}}
@@ -499,6 +673,9 @@ def build_workbook(project_state):
     _write_provenance(wb, project_state)
     _write_combined_view(wb, intersections, overrides)
     _write_raw_movements(wb, intersections, overrides)
+    # Forecasting deliverable — appends a "Corridor VMT" sheet only when the
+    # project carries forecasting results; otherwise a no-op (schema unchanged).
+    _write_corridor_vmt(wb, project_state)
 
     buf = io.BytesIO()
     wb.save(buf)
