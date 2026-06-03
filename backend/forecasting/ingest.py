@@ -26,6 +26,22 @@ from pathlib import Path
 
 from forecasting.adapters.sandag import ingest_sandag
 
+# ── Region adapter registry ───────────────────────────────────────────────────
+# A RegionAdapter is the callable contract `ingest_sandag` satisfies:
+#
+#   ingest_<region>(source, scenario_year, project_intersections_4326,
+#                   *, filter_radius_ft=300) -> NetworkLayer
+#
+# It reads a region's raw network, spatially filters to the project, reprojects
+# to the project CRS, and emits a canonical NetworkLayer whose links populate the
+# fields the engine consumes (flow, length_mi, daily_total). Adding a region =
+# implement that contract and register it here — NOT editing a conditional. See
+# docs/forecasting-multicounty.md ("How to add a region"). v1 ships SANDAG only;
+# additional adapters are deferred until a concrete second model exists.
+ADAPTERS = {
+    "SANDAG": ingest_sandag,
+}
+
 # Server-side SANDAG network assets live under the repo's data/ dir (gitignored).
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SANDAG_DATA_DIR = REPO_ROOT / "data" / "sandag"
@@ -89,12 +105,16 @@ def ingest_networks(
         { role: NetworkLayer } — one filtered NetworkLayer per supplied network.
 
     Raises:
-        NotImplementedError: region other than SANDAG.
-        ValueError: empty networks, missing role/scenario_year, duplicate role,
-            unresolvable path, or base↔horizon overlap below min_overlap.
+        ValueError: region with no registered adapter, empty networks, missing
+            role/scenario_year, duplicate role, unresolvable path, or base↔horizon
+            overlap below min_overlap.
     """
-    if region != "SANDAG":
-        raise NotImplementedError(f"region {region!r} has no adapter (v1 is SANDAG-only)")
+    adapter = ADAPTERS.get(region)
+    if adapter is None:
+        raise ValueError(
+            f"ingest_networks: no adapter registered for region {region!r} "
+            f"(available: {sorted(ADAPTERS)}). Register one in ADAPTERS — see "
+            "docs/forecasting-multicounty.md.")
     if not networks:
         raise ValueError("ingest_networks: no networks supplied")
 
@@ -108,7 +128,7 @@ def ingest_networks(
         if "scenario_year" not in spec:
             raise ValueError(f"ingest_networks: network role {role!r} missing 'scenario_year'")
         path = _resolve_path(spec)
-        layers[role] = ingest_sandag(
+        layers[role] = adapter(
             path, spec["scenario_year"], project_intersections_4326,
             filter_radius_ft=filter_radius_ft,
         )
