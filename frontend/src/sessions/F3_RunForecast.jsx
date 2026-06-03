@@ -5,12 +5,10 @@ import { Loader2, Play } from 'lucide-react'
 import {
   subscribe,
   getSnapshot,
-  getIntersections,
-  getLinks,
-  resolveLinkMode,
   setForecasting,
   isExistingAnalysisDone,
 } from '../store/projectStore'
+import { runForecast } from '../lib/forecastRun'
 
 import '../styles/forms.css'
 import '../styles/forecasting.css'
@@ -102,72 +100,10 @@ export default function F3_RunForecast() {
     setStatus('loading')
     setError(null)
     try {
-      const intersections = getIntersections()
-      const byId = new Map(intersections.map((it) => [it.id, it.num]))
-
-      // Balanced existing TMCs → {AM:{num:{mv}}, PM:{...}} (the count C).
-      const balanced_tmcs = { AM: {}, PM: {} }
-      for (const it of intersections) {
-        for (const p of ['AM', 'PM']) {
-          const b = it.balanced?.[p]
-          if (b && Object.keys(b).length) balanced_tmcs[p][it.num] = b
-        }
-      }
-
-      // Corridor links by num, with their effective (S5) modes.
-      const links = getLinks()
-        .map((l) => ({
-          fromNum: byId.get(l.fromId),
-          toNum: byId.get(l.toId),
-          direction: l.direction,
-          mode: resolveLinkMode(l.fromId, l.toId),
-        }))
-        .filter((l) => l.fromNum != null && l.toNum != null)
-
-      const coords = {}
-      for (const it of intersections) coords[it.num] = { lat: it.lat, lng: it.lng }
-
-      // Manual targets for unmatched legs the engineer entered by hand.
-      const manual_targets = {}
-      for (const m of matches) {
-        for (const d of DIRS) {
-          const leg = m.legs?.[d]
-          if (leg?.status === 'unmatched' && leg.decision === 'manual' && leg.manual) {
-            manual_targets[m.intersection_num] ??= {}
-            manual_targets[m.intersection_num][d] = {
-              inbound: Number(leg.manual.inbound),
-              outbound: Number(leg.manual.outbound),
-            }
-          }
-        }
-      }
-
-      const periods = snap.project?.analysisPeriods?.length
-        ? snap.project.analysisPeriods
-        : ['AM', 'PM']
-
-      const res = await fetch('/api/forecast/run', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          layers: fc.layers,
-          matches,
-          balanced_tmcs,
-          links,
-          coords,
-          periods,
-          method: settings.method,
-          refine_method: refineMethod,
-          peak_hour_factor: kValid ? Number(kRaw) : null,
-          manual_targets,
-        }),
-      })
-      if (!res.ok) {
-        let detail = `HTTP ${res.status}`
-        try { const j = await res.json(); if (j?.detail) detail = j.detail } catch { /* non-JSON */ }
-        throw new Error(detail)
-      }
-      const data = await res.json()
+      // The settings the run was made under: refineMethod collapses to 'ratio'
+      // unless a valid K unlocked difference/combined.
+      const runSettings = { ...settings, refineMethod }
+      const data = await runForecast({ snap, settings: runSettings })
       setForecasting({ results: data, settings })
       setStatus('idle')
     } catch (err) {

@@ -2,8 +2,9 @@ import { useEffect, useState, useSyncExternalStore } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Loader2, Info } from 'lucide-react'
 
-import { subscribe, getSnapshot, isExistingAnalysisDone } from '../store/projectStore'
+import { subscribe, getSnapshot, isExistingAnalysisDone, setForecasting } from '../store/projectStore'
 import { buildPayload } from '../lib/diagramPayload'
+import { runForecast } from '../lib/forecastRun'
 
 import '../styles/forms.css'
 import '../styles/forecasting.css'
@@ -50,6 +51,12 @@ export default function F4_FutureResults() {
     : (numsWithResults[0] ?? null)
 
   const [showProv, setShowProv] = useState(false)
+
+  // Scenario demand-reduction factor (entered as a percent). The tool applies it
+  // — it never supplies one. Persisted so it survives navigation.
+  const [scenPct, setScenPct] = useState(() => fc.settings?.scenarioReductionPct ?? '')
+  const [scenStatus, setScenStatus] = useState('idle')   // idle | loading | error
+  const [scenError, setScenError] = useState(null)
 
   const [diagrams, setDiagrams] = useState(() => new Map())
 
@@ -118,6 +125,36 @@ export default function F4_FutureResults() {
   const kRaw = fc.settings?.peakHourFactor
   const kValid = kRaw !== '' && kRaw != null && Number(kRaw) > 0
   const methodLabel = cap(kValid ? (fc.settings?.refineMethod || 'ratio') : 'ratio')
+
+  const scenario = results?.[effPeriod]?.vmt?.scenario ?? null
+
+  // Re-run /forecast/run with (or without) the scenario factor. The factor scales
+  // the forecast volumes server-side and corridor_vmt recomputes — same engine.
+  const reRun = async (scenarioFactor) => {
+    setScenStatus('loading')
+    setScenError(null)
+    try {
+      const data = await runForecast({ snap, settings: fc.settings ?? {}, scenarioFactor })
+      setForecasting({
+        results: data,
+        settings: { ...(fc.settings ?? {}), scenarioReductionPct: scenarioFactor == null ? '' : scenPct },
+      })
+      setScenStatus('idle')
+    } catch (e) {
+      setScenError(e.message)
+      setScenStatus('error')
+    }
+  }
+  const applyScenario = () => {
+    const pct = Number(scenPct)
+    if (!(scenPct !== '' && pct > 0 && pct < 100)) {
+      setScenError('Enter a reduction strictly between 0 and 100%.')
+      setScenStatus('error')
+      return
+    }
+    reRun(pct / 100)
+  }
+  const clearScenario = () => { setScenPct(''); reRun(null) }
   const existImg = diagrams.get(`${effActive}-${effPeriod}-existing`)
   const futImg = diagrams.get(`${effActive}-${effPeriod}-future`)
   const refinement = (results[effPeriod].refinement ?? []).find((r) => r.intersection_num === effActive)
@@ -150,6 +187,18 @@ export default function F4_FutureResults() {
 
       {/* Corridor VMT — green existing / amber future, unit + basis on its face. */}
       <VmtPanel vmt={results[effPeriod]?.vmt} />
+
+      {/* Scenario — engineer demand-reduction factor (applied, never generated). */}
+      <ScenarioControl
+        pct={scenPct}
+        onPct={setScenPct}
+        status={scenStatus}
+        error={scenError}
+        active={!!scenario}
+        onApply={applyScenario}
+        onClear={clearScenario}
+      />
+      {scenario && <ScenarioPanel scenario={scenario} />}
 
       {/* Controls */}
       <div className="di-fc-resctl">
@@ -264,6 +313,95 @@ function VmtPanel({ vmt }) {
         {c.gap_flag && <span className="di-fc-vmt__warn"> · ⚠ contains held segments</span>}
         {c.daily_estimated && (
           <span className="di-fc-vmt__warn"> · * daily estimated, expansion factor {c.expansion_factor}</span>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function ScenarioControl({ pct, onPct, status, error, active, onApply, onClear }) {
+  return (
+    <div className="di-fc-scenctl">
+      <label className="di-label" htmlFor="fc-scen">Demand-reduction scenario (optional)</label>
+      <div className="di-fc-scenctl__row">
+        <div className="di-fc-scenctl__inwrap">
+          <input
+            id="fc-scen"
+            className="di-input"
+            type="number"
+            inputMode="decimal"
+            min="0"
+            max="100"
+            step="0.5"
+            placeholder="% reduction"
+            value={pct}
+            onChange={(e) => onPct(e.target.value)}
+            style={{ maxWidth: 150 }}
+          />
+          <span className="di-fc-scenctl__unit">%</span>
+        </div>
+        <button
+          type="button"
+          className="di-fc-mini di-fc-mini--on"
+          disabled={status === 'loading'}
+          onClick={onApply}
+        >
+          {status === 'loading' ? 'Recomputing…' : active ? 'Update scenario' : 'Apply scenario'}
+        </button>
+        {active && (
+          <button type="button" className="di-fc-mini" disabled={status === 'loading'} onClick={onClear}>
+            Clear
+          </button>
+        )}
+      </div>
+      <p className="di-help" style={{ lineHeight: 1.5, marginTop: 6 }}>
+        Your assumption — e.g. a CAPCOA measure or your own study. DemandIQ applies the
+        factor to the forecast volumes and recomputes VMT; it never supplies or suggests
+        a reduction.
+      </p>
+      {status === 'error' && error && (
+        <div className="di-fc-banner di-fc-banner--error" role="alert" style={{ marginTop: 6 }}>
+          {error}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ScenarioPanel({ scenario: s }) {
+  const fmt = (n) => (n == null ? '—' : Math.round(n).toLocaleString())
+  const sign = (n) => (n >= 0 ? '+' : '')
+  const pct = s.pct != null ? Math.round(s.pct * 100) : null
+  const star = s.daily_estimated ? ' *' : ''
+  const hasDaily = s.daily_vmt != null
+  const factorPct = Math.round(s.factor * 100)
+  return (
+    <div className="di-fc-vmt di-fc-vmt--scenario">
+      <div className="di-fc-vmt__head">
+        Scenario VMT — demand −{factorPct}%
+        <span className="di-fc-vmt__basis">peak hr</span>
+      </div>
+      <div className="di-fc-vmt__row">
+        <span className="di-fc-vmt__fu">{fmt(s.baseline_vmt)} <em>veh-mi · baseline</em></span>
+        <span className="di-fc-vmt__arrow">→</span>
+        <span className="di-fc-vmt__ex">{fmt(s.vmt)} <em>veh-mi · scenario</em></span>
+        <span className="di-fc-vmt__delta">
+          {sign(s.delta)}{fmt(s.delta)}{pct != null ? ` · ${sign(pct)}${pct}%` : ''}
+        </span>
+      </div>
+      {hasDaily && (
+        <div className="di-fc-vmt__row di-fc-vmt__row--daily">
+          <span className="di-fc-vmt__tag">daily{star}</span>
+          <span className="di-fc-vmt__fu">{fmt(s.daily_baseline_vmt)}</span>
+          <span className="di-fc-vmt__arrow">→</span>
+          <span className="di-fc-vmt__ex">{fmt(s.daily_vmt)} <em>veh-mi · scenario{star}</em></span>
+          <span className="di-fc-vmt__delta">{sign(s.daily_delta)}{fmt(s.daily_delta)}</span>
+        </div>
+      )}
+      <div className="di-fc-vmt__chip">
+        engineer assumption — DemandIQ applies the {factorPct}% reduction, it does not generate it
+        {s.daily_estimated && (
+          <span className="di-fc-vmt__warn"> · * daily estimated, expansion factor {s.expansion_factor}</span>
         )}
       </div>
     </div>

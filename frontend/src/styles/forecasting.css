@@ -503,3 +503,28 @@
   line-height: 1.6;
 }
 .di-fc-vmt__warn { color: var(--signal-amber); }
+
+/* ── F4 scenario VMT — engineer demand-reduction factor ──────────────────── */
+/* Control: percent input + apply/clear. No preset value — the engineer supplies
+ * the assumption; the tool never suggests one. */
+.di-fc-scenctl { margin-bottom: 14px; }
+.di-fc-scenctl__row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.di-fc-scenctl__inwrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.di-fc-scenctl__unit { color: var(--text-tertiary); font-size: 13px; }
+
+/* Scenario panel — a dashed amber-edged sibling of the VMT panel, so the
+ * mitigated number reads as a scenario, never the unmitigated forecast. */
+.di-fc-vmt--scenario {
+  border-style: dashed;
+  border-color: var(--signal-amber);
+  background: var(--signal-amber-glow);
+}
