@@ -41,6 +41,7 @@ from line_diagram import (
     DPI,
 )
 from excel_export import build_workbook
+from forecasting.api import router as forecasting_router
 
 # ── Config ────────────────────────────────────────────────────────────────────
 API_KEY = os.getenv("ANTHROPIC_API_KEY")
@@ -83,6 +84,14 @@ def require_auth(creds: HTTPBasicCredentials = Depends(security)):
             headers={"WWW-Authenticate": 'Basic realm="DemandIQ"'},
         )
     return creds.username
+
+
+# ── Forecasting routes (Method 1 / NCHRP 765) — mounted under /forecast ───────
+# The import above is geo-free (the adapter's geopandas import is lazy), so the
+# app starts under any interpreter; only /forecast/ingest-match needs the geo
+# deps at call time (503 otherwise). Auth matches the rest of the app.
+app.include_router(forecasting_router, prefix="/forecast",
+                   dependencies=[Depends(require_auth)])
 
 
 # ── Routes ────────────────────────────────────────────────────────────────────

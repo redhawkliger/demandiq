@@ -6,3 +6,8 @@ Test/
 .env
 frontend/node_modules/
 frontend/dist/
+
+# Forecasting: SANDAG network data (hwyLoad.dbf is ~93 MB — never commit)
+data/sandag/
+# Forecasting: isolated geo-deps virtualenv (geopandas/GDAL — dev/test only)
+backend/.venv-forecasting/

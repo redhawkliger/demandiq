@@ -16,7 +16,7 @@ export const THEMES = [
     blurb: 'Dark — easy on the eyes for late corridor work and projectors.',
     // Preview swatch (mirrors themes.css; can't use var() — those resolve to the
     // ACTIVE theme, but each card must show its OWN palette).
-    swatch: { bg: '#07080D', surface: '#1A1D26', accent: '#60A5FA' },
+    swatch: { bg: '#0B0E12', surface: '#161A22', accent: '#60A5FA' },
   },
   {
     id: 'sunshine',

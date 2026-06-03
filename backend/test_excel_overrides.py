@@ -432,6 +432,264 @@ def test_provenance_legacy_run_degrades_gracefully():
     print(f"  test_provenance_legacy_run_degrades_gracefully: PASS")
 
 
+# ── Corridor VMT sheet (forecasting deliverable) ──────────────────────────────
+def _vmt_obj(*, daily_estimated=False, expansion_factor=None, gap_flag=False,
+             held=False, with_daily=True, scenario_factor=None):
+    """A corridor_vmt()-shaped object for one period (mirrors vmt.py output)."""
+    corridor = {
+        'basis': 'peak_hour', 'unit': 'veh-mi',
+        'existing_vmt': 1800.0, 'future_vmt': 2700.0, 'delta': 900.0,
+        'corridor_length_mi': 1.0, 'link_count': 1, 'gap_flag': gap_flag,
+        'daily_existing_vmt': 9000.0 if with_daily else None,
+        'daily_future_vmt': 13500.0 if with_daily else None,
+        'daily_delta': 4500.0 if with_daily else None,
+        'daily_estimated': daily_estimated, 'expansion_factor': expansion_factor,
+    }
+    links = [{
+        'from_num': 1, 'to_num': 2, 'length_mi': 1.0,
+        'existing_vol': 1800.0, 'future_vol': 2700.0,
+        'existing_vmt': 1800.0, 'future_vmt': 2700.0, 'delta': 900.0,
+        'chain_link_ids': ['L1', 'L2'], 'held': held,
+    }]
+    scenario = None
+    if scenario_factor:
+        keep = 1 - scenario_factor
+        scenario = {
+            'factor': scenario_factor, 'basis': 'peak_hour', 'unit': 'veh-mi',
+            'vmt': round(2700.0 * keep, 1), 'baseline_vmt': 2700.0,
+            'delta': round(2700.0 * keep - 2700.0, 1), 'pct': round(-scenario_factor, 4),
+            'daily_vmt': round(13500.0 * keep, 1) if with_daily else None,
+            'daily_baseline_vmt': 13500.0 if with_daily else None,
+            'daily_delta': round(13500.0 * keep - 13500.0, 1) if with_daily else None,
+            'daily_estimated': daily_estimated, 'expansion_factor': expansion_factor,
+            'links': [{'from_num': 1, 'to_num': 2, 'baseline_future_vmt': 2700.0,
+                       'scenario_future_vmt': round(2700.0 * keep, 1),
+                       'delta': round(2700.0 * keep - 2700.0, 1)}],
+        }
+    return {'period': 'AM', 'unit': 'veh-mi', 'corridor': corridor,
+            'network': dict(corridor), 'links': links, 'scenario': scenario}
+
+
+def _forecasting_state(*, vmt_am=None, vmt_pm=None):
+    results = {}
+    if vmt_am is not None:
+        results['AM'] = {'vmt': vmt_am}
+    if vmt_pm is not None:
+        results['PM'] = {'vmt': vmt_pm}
+    return {
+        'project': {'name': 'Forecast run', 'analysisPeriods': ['AM']},
+        'intersections': [],
+        'balancing': {'overrides': {'AM': {}, 'PM': {}}},
+        'analysis': {'lastRun': {'qcFlags': []}},
+        'forecasting': {'results': results},
+    }
+
+
+def _colA_row(ws, text):
+    """Row index whose column-A value equals text (first match), or None."""
+    for r in range(1, ws.max_row + 1):
+        if ws.cell(row=r, column=1).value == text:
+            return r
+    return None
+
+
+def _has_colA_prefix(ws, prefix):
+    for r in range(1, ws.max_row + 1):
+        v = ws.cell(row=r, column=1).value
+        if isinstance(v, str) and v.startswith(prefix):
+            return True
+    return False
+
+
+def test_corridor_vmt_sheet_present_and_matches_object():
+    """With forecasting results, a 'Corridor VMT' sheet renders the corridor
+    summary, per-link breakdown, and network rollup straight from the vmt object."""
+    state = _forecasting_state(vmt_am=_vmt_obj())  # data-derived daily, clean
+    wb = load_workbook(io.BytesIO(build_workbook(state)), data_only=True)
+
+    assert 'Corridor VMT' in wb.sheetnames, wb.sheetnames
+    ws = wb['Corridor VMT']
+
+    # Period banner present.
+    assert _colA_row(ws, 'AM Peak — Corridor VMT'), 'period banner missing'
+
+    # Corridor summary (label in A, value in B).
+    def _val(label):
+        r = _colA_row(ws, label)
+        assert r, f'summary row {label!r} missing'
+        return ws.cell(row=r, column=2).value
+    assert _val('Existing VMT (veh-mi)') == 1800.0
+    assert _val('Future VMT (veh-mi)') == 2700.0
+    assert _val('Δ VMT (veh-mi)') == 900.0
+    assert _val('Basis') == 'Peak hour'
+    assert _val('Corridor length (mi)') == 1.0
+    assert _val('Links') == 1
+    # Data-derived daily: present and numeric (no asterisk).
+    assert _val('Daily existing VMT (veh-mi)') == 9000.0
+    assert _val('Daily future VMT (veh-mi)') == 13500.0
+    assert _has_colA_prefix(ws, 'Daily VMT estimated') is False, 'unexpected daily note'
+    assert _colA_row(ws, '⚠ Contains held segments') is None, 'unexpected gap note'
+
+    # Per-link breakdown header + the one link row.
+    hdr_row = _colA_row(ws, 'From')
+    assert hdr_row, 'per-link header missing'
+    expected = ['From', 'To', 'Length (mi)', 'Existing vol', 'Future vol',
+                'Existing VMT', 'Future VMT', 'Δ VMT', 'Held']
+    actual = [ws.cell(row=hdr_row, column=c).value for c in range(1, 10)]
+    assert actual == expected, actual
+    lr = hdr_row + 1
+    link = [ws.cell(row=lr, column=c).value for c in range(1, 10)]
+    assert link[0] == 1 and link[1] == 2, link            # from / to
+    assert link[2] == 1.0                                  # length
+    assert link[3] == 1800.0 and link[4] == 2700.0         # existing/future vol
+    assert link[5] == 1800.0 and link[6] == 2700.0         # existing/future vmt
+    assert link[7] == 900.0                                # Δ
+    assert link[8] in (None, ''), link[8]                  # Held blank when clean
+
+    # Network rollup row.
+    nr = _colA_row(ws, 'Network total')
+    assert nr, 'network rollup row missing'
+    assert ws.cell(row=nr, column=6).value == 1800.0       # existing VMT
+    assert ws.cell(row=nr, column=7).value == 2700.0       # future VMT
+    assert ws.cell(row=nr, column=8).value == 900.0        # Δ
+    print('  test_corridor_vmt_sheet_present_and_matches_object: PASS')
+
+
+def test_corridor_vmt_sheet_absent_without_forecasting():
+    """Non-forecasting exports keep the three-tab schema — no Corridor VMT sheet."""
+    state = {
+        'project': {'name': 'Test', 'analysisPeriods': []},
+        'intersections': [{
+            'num': 1, 'name': 'Foo',
+            'approaches': {'EB': {'exists': True, 'lanes': [{'movement': 'LTR'}]}},
+            'volumes': {'AM': {'EBT': {'value': 100, '_source': 'agent'}}},
+            'balanced': {'AM': {'EBT': 100}},
+        }],
+        'balancing': {'overrides': {'AM': {}, 'PM': {}}},
+        'analysis': {'lastRun': {}},
+    }
+    wb = load_workbook(io.BytesIO(build_workbook(state)), data_only=True)
+    assert wb.sheetnames == ['Provenance', 'Combined View', 'Raw Movements'], wb.sheetnames
+    # An empty forecasting.results block is treated the same as absent.
+    state2 = _forecasting_state()
+    wb2 = load_workbook(io.BytesIO(build_workbook(state2)), data_only=True)
+    assert 'Corridor VMT' not in wb2.sheetnames, wb2.sheetnames
+    print('  test_corridor_vmt_sheet_absent_without_forecasting: PASS')
+
+
+def test_corridor_vmt_daily_estimated_carries_asterisk_and_note():
+    """Engineer-factor-estimated daily → asterisk on the value + the factor note."""
+    state = _forecasting_state(
+        vmt_am=_vmt_obj(daily_estimated=True, expansion_factor=0.1))
+    wb = load_workbook(io.BytesIO(build_workbook(state)), data_only=True)
+    ws = wb['Corridor VMT']
+
+    r = _colA_row(ws, 'Daily future VMT (veh-mi)')
+    assert r, 'daily future row missing'
+    val = ws.cell(row=r, column=2).value
+    assert isinstance(val, str) and val.endswith('*'), f'expected asterisk; got {val!r}'
+
+    note_row = None
+    for rr in range(1, ws.max_row + 1):
+        v = ws.cell(row=rr, column=1).value
+        if isinstance(v, str) and v.startswith('Daily VMT estimated from peak-hour'):
+            note_row = rr
+            break
+    assert note_row, 'daily-estimated note missing'
+    assert '0.1' in ws.cell(row=note_row, column=1).value, ws.cell(row=note_row, column=1).value
+    print('  test_corridor_vmt_daily_estimated_carries_asterisk_and_note: PASS')
+
+
+def test_corridor_vmt_data_derived_daily_has_no_asterisk_or_note():
+    """Data-derived daily (daily_estimated False) carries neither asterisk nor note."""
+    state = _forecasting_state(vmt_am=_vmt_obj(daily_estimated=False))
+    wb = load_workbook(io.BytesIO(build_workbook(state)), data_only=True)
+    ws = wb['Corridor VMT']
+    r = _colA_row(ws, 'Daily future VMT (veh-mi)')
+    val = ws.cell(row=r, column=2).value
+    assert val == 13500.0, f'expected bare numeric; got {val!r}'
+    assert not _has_colA_prefix(ws, 'Daily VMT estimated'), 'unexpected daily note'
+    print('  test_corridor_vmt_data_derived_daily_has_no_asterisk_or_note: PASS')
+
+
+def test_corridor_vmt_gap_note_only_when_held():
+    """Gap note + Held flag appear only when the corridor carries held segments."""
+    # Held case.
+    held_ws = load_workbook(
+        io.BytesIO(build_workbook(_forecasting_state(
+            vmt_am=_vmt_obj(gap_flag=True, held=True)))),
+        data_only=True)['Corridor VMT']
+    assert _colA_row(held_ws, '⚠ Contains held segments'), 'gap note missing when held'
+    hdr = _colA_row(held_ws, 'From')
+    assert held_ws.cell(row=hdr + 1, column=9).value == 'Y', 'Held column not flagged'
+
+    # Clean case — no gap note, Held blank.
+    clean_ws = load_workbook(
+        io.BytesIO(build_workbook(_forecasting_state(vmt_am=_vmt_obj()))),
+        data_only=True)['Corridor VMT']
+    assert _colA_row(clean_ws, '⚠ Contains held segments') is None, 'gap note when clean'
+    hdr2 = _colA_row(clean_ws, 'From')
+    assert clean_ws.cell(row=hdr2 + 1, column=9).value in (None, '')
+    print('  test_corridor_vmt_gap_note_only_when_held: PASS')
+
+
+def test_corridor_vmt_scenario_section_present_with_factor():
+    """A demand-reduction factor renders a labeled Scenario block — factor on
+    its face, baseline vs scenario vs Δ, and a per-link baseline/scenario table."""
+    state = _forecasting_state(vmt_am=_vmt_obj(scenario_factor=0.10))
+    ws = load_workbook(io.BytesIO(build_workbook(state)), data_only=True)['Corridor VMT']
+
+    # Banner carries the word "Scenario" and the factor (10%).
+    banner = None
+    for r in range(1, ws.max_row + 1):
+        v = ws.cell(row=r, column=1).value
+        if isinstance(v, str) and v.startswith('Scenario — demand reduction'):
+            banner = v
+            break
+    assert banner, 'scenario banner missing'
+    assert '10%' in banner, banner
+
+    assert _colA_row(ws, 'Baseline VMT (veh-mi)'), 'baseline row missing'
+    assert _colA_row(ws, 'Scenario VMT (veh-mi)'), 'scenario row missing'
+    # Scenario VMT = 2700 × (1 − 0.10) = 2430.
+    assert ws.cell(row=_colA_row(ws, 'Scenario VMT (veh-mi)'), column=2).value == 2430.0
+    # Δ % shown as a labeled percentage.
+    pct_row = _colA_row(ws, 'Δ %')
+    assert pct_row and ws.cell(row=pct_row, column=2).value == '-10.0%'
+
+    # Per-link baseline-vs-scenario header present.
+    found = False
+    for r in range(1, ws.max_row + 1):
+        if (ws.cell(row=r, column=3).value == 'Baseline VMT'
+                and ws.cell(row=r, column=4).value == 'Scenario VMT'):
+            found = True
+            break
+    assert found, 'scenario per-link header missing'
+    print('  test_corridor_vmt_scenario_section_present_with_factor: PASS')
+
+
+def test_corridor_vmt_scenario_section_absent_without_factor():
+    """No scenario factor → no Scenario block (baseline forecast only)."""
+    ws = load_workbook(
+        io.BytesIO(build_workbook(_forecasting_state(vmt_am=_vmt_obj()))),
+        data_only=True)['Corridor VMT']
+    for r in range(1, ws.max_row + 1):
+        v = ws.cell(row=r, column=1).value
+        assert not (isinstance(v, str) and v.startswith('Scenario — demand reduction')), \
+            'unexpected scenario block'
+    assert _colA_row(ws, 'Baseline VMT (veh-mi)') is None, 'unexpected scenario rows'
+    print('  test_corridor_vmt_scenario_section_absent_without_factor: PASS')
+
+
+def test_corridor_vmt_both_periods_rendered():
+    """AM and PM each get their own banner + breakdown when both carry results."""
+    state = _forecasting_state(vmt_am=_vmt_obj(), vmt_pm=_vmt_obj())
+    ws = load_workbook(io.BytesIO(build_workbook(state)), data_only=True)['Corridor VMT']
+    assert _colA_row(ws, 'AM Peak — Corridor VMT'), 'AM banner missing'
+    assert _colA_row(ws, 'PM Peak — Corridor VMT'), 'PM banner missing'
+    print('  test_corridor_vmt_both_periods_rendered: PASS')
+
+
 if __name__ == '__main__':
     tests = [
         test_export_honors_overrides,
@@ -441,6 +699,14 @@ if __name__ == '__main__':
         test_provenance_qc_empty_renders_all_clean,
         test_provenance_includes_resolved_link_targets_with_f7_recon,
         test_provenance_legacy_run_degrades_gracefully,
+        test_corridor_vmt_sheet_present_and_matches_object,
+        test_corridor_vmt_sheet_absent_without_forecasting,
+        test_corridor_vmt_daily_estimated_carries_asterisk_and_note,
+        test_corridor_vmt_data_derived_daily_has_no_asterisk_or_note,
+        test_corridor_vmt_gap_note_only_when_held,
+        test_corridor_vmt_scenario_section_present_with_factor,
+        test_corridor_vmt_scenario_section_absent_without_factor,
+        test_corridor_vmt_both_periods_rendered,
     ]
     passed = 0; failed = 0
     for t in tests:

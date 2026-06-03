@@ -1,0 +1,17 @@
+# DemandIQ Forecasting — geo dependencies.
+#
+# NOT installed into the production (Render) image. The lean app installs only
+# requirements.txt; these are dev/build-time on the engineer's machine (and
+# later on whichever container actually serves the network adapter).
+#
+# Imported LAZILY inside the adapter functions (never at module load), so the
+# existing app's startup and import graph pay nothing for them.
+#
+# Install (isolated, recommended):
+#   python3.12 -m venv backend/.venv-forecasting
+#   backend/.venv-forecasting/bin/pip install -r backend/requirements-forecasting.txt
+
+geopandas
+pyogrio
+shapely
+pyproj

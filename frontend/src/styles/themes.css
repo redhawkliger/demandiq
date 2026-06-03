@@ -22,13 +22,28 @@
  * data-theme attribute still renders correctly.
  */
 
+/* ── Signal palette (traffic-signal semantics) — CONSTANT across themes. ──────
+ * Amber anchors Forecasting (F1–F4); green anchors Existing conditions; red is
+ * RESERVED for alerts (methodology divergence, unmatched-leg status, validation
+ * errors) — never decorative. Match-review status colors map straight to these.
+ * Not gated on data-theme: signals don't change between night/day, and the
+ * sunshine block below doesn't override them, so both themes inherit these. */
+:root {
+  --signal-green:       #22C55E;
+  --signal-amber:       #F4B400;
+  --signal-red:         #EF4444;
+  --signal-amber-hover: #FFC526;
+  --signal-amber-glow:  rgba(244, 180, 0, 0.10);
+  --signal-green-glow:  rgba(34, 197, 94, 0.10);
+}
+
 :root,
 :root[data-theme="night-traffic"] {
-  --bg-base:        #07080D;
+  --bg-base:        #0B0E12;   /* Batman charcoal canvas */
   --bg-deep:        #0F1118;
   --bg-elevated:    rgba(255, 255, 255, 0.02);
   --bg-hover:       rgba(255, 255, 255, 0.04);
-  --surface:        #1A1D26;
+  --surface:        #161A22;   /* charcoal surface */
   --accent:         #60A5FA;
   --accent-hover:   #7DB3FB;
   --accent-glow:    rgba(96, 165, 250, 0.06);
