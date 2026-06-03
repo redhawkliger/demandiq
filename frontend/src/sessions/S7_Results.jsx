@@ -60,6 +60,7 @@ export default function S7_Results() {
   const navigate = useNavigate()
   const snap = useSyncExternalStore(subscribe, getSnapshot, () => ({}))
   const intersections = snap.intersections || []
+  const links = snap.links || []   // explicit corridor graph — same source S2 uses
   const lastRun = snap.analysis?.lastRun ?? null
   const period   = snap.results?.period   ?? 'AM'
   const viewMode = snap.results?.viewMode ?? 'combined'
@@ -182,6 +183,7 @@ export default function S7_Results() {
         <div className="di-s7__right">
           <ResultsMap
             intersections={intersections}
+            links={links}
             selectedId={selectedId}
             onSelect={setSelectedId}
             period={period}
