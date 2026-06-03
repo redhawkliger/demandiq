@@ -230,14 +230,18 @@ def run_qc(intersections, unbalanced_volumes, extracted_meta, balanced, corridor
     else:
         out_dir, in_dir = 'NB', 'SB'
 
-    sorted_ints = sorted(intersections, key=lambda x: x['num'])
+    # Corridor adjacency = the GIVEN intersections order (corridor order) — the
+    # same list/order balance_corridor pairs its links from. NOT sorted by int
+    # number, which diverged from the corridor (and from balance_corridor) the
+    # moment IDs weren't entered in ascending corridor order. Using the given
+    # order makes QC-08's links match the corridor by construction.
     for period in ['AM', 'PM']:
         bal = balanced.get(period, {})
         if not bal:
             continue
-        for i in range(len(sorted_ints) - 1):
-            up = sorted_ints[i]['num']
-            dn = sorted_ints[i + 1]['num']
+        for i in range(len(intersections) - 1):
+            up = intersections[i]['num']
+            dn = intersections[i + 1]['num']
             if up not in bal or dn not in bal:
                 continue
             out_gap = abs(bal[up].get(f'{out_dir}T', 0) - bal[dn].get(f'{out_dir}T', 0))
