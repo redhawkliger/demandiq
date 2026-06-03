@@ -708,7 +708,7 @@ def balance_corridor(intersections, unbalanced_vols, corridor_dir, period,
 
 # ── Step 9: QC ────────────────────────────────────────────────────────────
 def run_qc(intersections, data_map, extracted, peak_choices,
-           balanced_am, balanced_pm, corridor_peak, prohibited):
+           balanced_am, balanced_pm, corridor_peak, prohibited, corridor_dir):
     flags = []
 
     for inter in intersections:
@@ -767,20 +767,32 @@ def run_qc(intersections, data_map, extracted, peak_choices,
                         flags.append({'check':'QC-07','int':n,'period':period,
                             'message':f"Int {n} {period}: {ap} approach marked prohibited but has {ap_total} vehicles in count data"})
 
-    # QC-08: Post-balance residual
+    # QC-08: Post-balance residual.
+    # Corridor adjacency = ROW order (2_Intersections) — the same pairing
+    # balance_config / balance_corridor use. NOT sorted(int numbers), which only
+    # matched when IDs were entered in ascending corridor order.
+    # Through-movement pair follows the corridor direction:
+    #   EB/WB → forward=EBT (row order, west→east), reverse=WBT
+    #   NB/SB → forward=NBT (row order, north→south), reverse=SBT
+    if corridor_dir == 'NB/SB':
+        fwd_mv, rev_mv, fwd_lbl, rev_lbl = 'NBT', 'SBT', 'NB', 'SB'
+    else:  # EB/WB
+        fwd_mv, rev_mv, fwd_lbl, rev_lbl = 'EBT', 'WBT', 'EB', 'WB'
+    order = [it['num'] for it in intersections]      # row 6 = corridor origin
     for period, bal in [('AM',balanced_am),('PM',balanced_pm)]:
         if not bal: continue
-        ints = sorted(bal.keys())
-        for i in range(len(ints)-1):
-            up, dn = ints[i], ints[i+1]
-            eb_gap = abs(bal[up].get('EBT',0) - bal[dn].get('EBT',0))
-            wb_gap = abs(bal[dn].get('WBT',0) - bal[up].get('WBT',0))
-            if eb_gap > 5:
+        for i in range(len(order)-1):
+            up, dn = order[i], order[i+1]             # up = upstream in corridor order
+            if up not in bal or dn not in bal:        # skip ints that didn't balance
+                continue
+            fwd_gap = abs(bal[up].get(fwd_mv,0) - bal[dn].get(fwd_mv,0))
+            rev_gap = abs(bal[dn].get(rev_mv,0) - bal[up].get(rev_mv,0))
+            if fwd_gap > 5:
                 flags.append({'check':'QC-08','int':up,'period':period,
-                    'message':f"Int {up}→{dn} {period} EB: residual gap {eb_gap} veh after balancing"})
-            if wb_gap > 5:
+                    'message':f"Int {up}→{dn} {period} {fwd_lbl}: residual gap {fwd_gap} veh after balancing"})
+            if rev_gap > 5:
                 flags.append({'check':'QC-08','int':dn,'period':period,
-                    'message':f"Int {dn}→{up} {period} WB: residual gap {wb_gap} veh after balancing"})
+                    'message':f"Int {dn}→{up} {period} {rev_lbl}: residual gap {rev_gap} veh after balancing"})
 
     return flags
 
@@ -1581,7 +1593,8 @@ def main():
 
     print("\nRunning QC checks...")
     qc_flags = run_qc(intersections, data_map, extracted, peak_choices,
-                      balanced_am, balanced_pm, cfg['corridor_peak'], cfg['prohibited'])
+                      balanced_am, balanced_pm, cfg['corridor_peak'], cfg['prohibited'],
+                      cfg['corridor_dir'])
     if qc_flags:
         print(f"  {len(qc_flags)} flag(s):")
         for f in qc_flags: print(f"    [{f['check']}] {f['message']}")
