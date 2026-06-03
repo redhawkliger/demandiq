@@ -19,12 +19,14 @@ MATCHES = [{"intersection_num": 1, "snapped_node": 100, "legs": {}},
 
 
 def _nl(lid, fn, tn, *, len_mile, total_flow, ab_am, ba_am):
+    # Canonical contract only — no source_attributes. If vmt still reads SANDAG
+    # column strings, these links would carry none and the daily/length tests fail.
     return NetworkLink(
         link_id=lid, from_node=fn, to_node=tn,
         geometry=[(0.0, 0.0), (0.01, 0.0)], from_node_xy=(0.0, 0.0), to_node_xy=(0.01, 0.0),
-        flow=DirectionalFlow(),
-        source_attributes={"len_mile": len_mile, "total_flow": total_flow,
-                           "ab_am_flow": ab_am, "ba_am_flow": ba_am},
+        length_mi=len_mile,
+        daily_total=total_flow,
+        flow=DirectionalFlow(ab={Period.AM: ab_am}, ba={Period.AM: ba_am}),
     )
 
 

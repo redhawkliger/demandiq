@@ -33,6 +33,7 @@ from forecasting.contract import (
     NetworkLink,
     Period,
 )
+from forecasting.geo import polyline_length_mi
 
 # ── SANDAG field map — verified against the real hwyLoad.shp (40,720 records). ─
 # The ONE schema-coupled place in the module. If a future SANDAG vintage renames
@@ -44,6 +45,8 @@ COL_NAME = "link_name"
 COL_FC = "fc_desc"
 COL_AB_AM_LANE = "ab_am_lane"
 COL_BA_AM_LANE = "ba_am_lane"
+COL_LEN_MILE = "len_mile"     # model-native link length, miles
+COL_TOTAL_FLOW = "total_flow" # daily total volume (both dirs, all periods)
 
 # Period → (AB column, BA column). SANDAG pattern: {ab|ba}_{period}_flow.
 FLOW_COLS = {
@@ -202,6 +205,11 @@ def ingest_sandag(
     for _, row in filtered.iterrows():
         coords = [(float(x), float(y)) for (x, y) in _coords_list(row.geometry)]
         name = _py(row.get(COL_NAME))
+        # Canonical length: model-native len_mile when positive, else great-circle
+        # from the (already reprojected, 4326) geometry. The engine reads this, not
+        # the raw SANDAG column.
+        len_native = _float0(row.get(COL_LEN_MILE))
+        length_mi = len_native if len_native > 0 else polyline_length_mi(coords)
         links.append(NetworkLink(
             link_id=str(_int_or(row[COL_LINK_ID])),
             from_node=_int_or(row[COL_FROM_NODE]),
@@ -209,6 +217,7 @@ def ingest_sandag(
             geometry=coords,
             from_node_xy=coords[0],
             to_node_xy=coords[-1],
+            length_mi=length_mi,
             name=str(name) if name is not None else None,
             functional_class=SANDAG_FC_MAP.get(_py(row.get(COL_FC)), "Other"),
             lanes=max(_int_or(row.get(COL_AB_AM_LANE)), _int_or(row.get(COL_BA_AM_LANE))),
@@ -216,6 +225,7 @@ def ingest_sandag(
                 ab={p: _float0(row[ab]) for p, (ab, ba) in FLOW_COLS.items()},
                 ba={p: _float0(row[ba]) for p, (ab, ba) in FLOW_COLS.items()},
             ),
+            daily_total=_float0(row.get(COL_TOTAL_FLOW)),
             source_attributes={c: _py(row[c]) for c in attr_cols},
         ))
 

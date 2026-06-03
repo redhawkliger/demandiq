@@ -6,13 +6,14 @@ corridor's through-links, rolled up link → corridor → network, for existing,
 future, and delta. No buffer.
 
 Failure modes designed out (see the spec):
-  A. Length is CRS-correct MILES — SANDAG `len_mile` (model-native), geodesic
-     fallback from the 4326 geometry. NEVER Euclidean on lat/lng degrees.
+  A. Length is CRS-correct MILES — read from the canonical NetworkLink.length_mi
+     (the adapter set it from the model-native length, else a great-circle
+     fallback from the 4326 geometry). NEVER Euclidean on lat/lng degrees.
   B. Volume basis is pinned + labeled. Peak-hour is always clean. Daily is
-     count-anchored: peak-hour forecast × the model's own per-corridor daily/peak
-     ratio (Σ total_flow / Σ period_flow over the chain) — data-derived, no
-     asterisk. Only the engineer-factor fallback gets the asterisk; with neither,
-     daily is omitted (peak-hour still clean).
+     count-anchored: peak-hour forecast × the model's own per-corridor daily/period
+     ratio (Σ link.daily_total / Σ period flow over the chain, both from the
+     canonical contract) — data-derived, no asterisk. Only the engineer-factor
+     fallback gets the asterisk; with neither, daily is omitted (peak-hour clean).
   C. Held/untraceable segments are hold-flat-and-flag — included at their value,
      corridor flagged. Never dropped (undercount) or substituted (overcount).
   D. Through-links are TRACED node→node along the model chain (not the single
@@ -23,43 +24,19 @@ Reuses balancer.resolve_link_volumes for the conserved directional link volumes
 value) and the standard period/flow conventions.
 """
 
-import math
-
 from balancer import resolve_link_volumes
+from forecasting.geo import haversine_mi, polyline_length_mi
 
-# Source columns for each period's directional model flow (SANDAG schema).
-PERIOD_FLOW_COLS = {
-    "EA": ("ab_ea_flow", "ba_ea_flow"),
-    "AM": ("ab_am_flow", "ba_am_flow"),
-    "MD": ("ab_md_flow", "ba_md_flow"),
-    "PM": ("ab_pm_flow", "ba_pm_flow"),
-    "EV": ("ab_ev_flow", "ba_ev_flow"),
-}
 DIRS = ("NB", "SB", "EB", "WB")
 
 
-def _haversine_mi(lng1, lat1, lng2, lat2):
-    r = 3958.8
-    p1, p2 = math.radians(lat1), math.radians(lat2)
-    dp = math.radians(lat2 - lat1)
-    dl = math.radians(lng2 - lng1)
-    a = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
-    return 2 * r * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-
-
 def _link_len_mi(link):
-    """Model-native len_mile (CRS-correct); geodesic from geometry as fallback.
-    Never Euclidean on degrees."""
-    la = (link.source_attributes or {}).get("len_mile")
-    try:
-        v = float(la)
-        if v > 0:
-            return v
-    except (TypeError, ValueError):
-        pass
-    g = link.geometry or []
-    return sum(_haversine_mi(g[i][0], g[i][1], g[i + 1][0], g[i + 1][1])
-               for i in range(len(g) - 1))
+    """Canonical length in miles — the adapter-set NetworkLink.length_mi, with a
+    great-circle fallback from geometry for hand-built links that lack it. Reads
+    the contract, never a region-specific source column. Never Euclidean."""
+    if link.length_mi is not None:
+        return link.length_mi
+    return polyline_length_mi(link.geometry)
 
 
 def _build_graph(layer):
@@ -104,14 +81,13 @@ def _trace_chain(adj, src, dst):
 
 
 def _chain_daily_ratio(chain_links, period):
-    """Model daily/peak ratio Σ total_flow / Σ (ab+ba period flow) over the chain.
-    Data-derived (the model's own structure); None if no period flow."""
-    ab_col, ba_col = PERIOD_FLOW_COLS[period]
+    """Model daily/period ratio Σ daily_total / Σ (ab+ba period flow) over the
+    chain — read from the canonical contract (NetworkLink.daily_total and .flow),
+    not region-specific columns. Data-derived; None if no period flow."""
     tot = per = 0.0
     for lk in chain_links:
-        sa = lk.source_attributes or {}
-        tot += float(sa.get("total_flow") or 0)
-        per += float(sa.get(ab_col) or 0) + float(sa.get(ba_col) or 0)
+        tot += lk.daily_total or 0.0
+        per += (lk.flow.ab.get(period) or 0.0) + (lk.flow.ba.get(period) or 0.0)
     return (tot / per) if per > 0 else None
 
 
@@ -172,7 +148,7 @@ def corridor_vmt(corridor_links, coords, match_results, base_layer, horizon_laye
         if held:
             gap = True
             ca, cb = coords.get(a, {}), coords.get(b, {})
-            length = (_haversine_mi(ca["lng"], ca["lat"], cb["lng"], cb["lat"])
+            length = (haversine_mi(ca["lng"], ca["lat"], cb["lng"], cb["lat"])
                       if ca and cb else 0.0)
             chain_ids = []
         else:
@@ -182,8 +158,8 @@ def corridor_vmt(corridor_links, coords, match_results, base_layer, horizon_laye
         ex_vmt, fu_vmt = ex_vol * length, fu_vol * length
 
         # Daily: data-derived ratio per year, else engineer factor, else omit.
-        r_base = _chain_daily_ratio([base_by_id[i] for i in chain_ids if i in base_by_id], p) if chain_ids else None
-        r_hor = _chain_daily_ratio([hor_by_id[i] for i in chain_ids if i in hor_by_id], p) if chain_ids else None
+        r_base = _chain_daily_ratio([base_by_id[i] for i in chain_ids if i in base_by_id], period) if chain_ids else None
+        r_hor = _chain_daily_ratio([hor_by_id[i] for i in chain_ids if i in hor_by_id], period) if chain_ids else None
         if r_base is not None and r_hor is not None:
             seg_daily.append((ex_vmt * r_base, fu_vmt * r_hor, "data"))
         elif expansion_factor:

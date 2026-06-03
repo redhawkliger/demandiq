@@ -65,6 +65,10 @@ class NetworkLink(BaseModel):
     geometry: list[Coord]        # LineString, from_node → to_node order
     from_node_xy: Coord          # node snap targets for the matcher
     to_node_xy: Coord
+    # Canonical link length in MILES — the adapter computes it (model-native field
+    # if present, else great-circle from geometry) so the engine never re-derives
+    # length from region-specific source columns. None only on hand-built links.
+    length_mi: float | None = None
 
     # ── Classification (match-review sanity, e.g. don't bind freeway↔arterial) ─
     name: str | None = None
@@ -73,6 +77,10 @@ class NetworkLink(BaseModel):
 
     # ── Volumes (for the layer's scenario_year) ──────────────────────────────
     flow: DirectionalFlow
+    # Canonical model DAILY total volume (both directions, all periods) — the
+    # adapter populates it so VMT's daily ratio reads the contract, not a
+    # region-specific column name. None when the source model has no daily total.
+    daily_total: float | None = None
 
     # ── Provenance — the raw source row stays per-link ───────────────────────
     source_attributes: dict[str, str | float | int | None] = Field(default_factory=dict)
