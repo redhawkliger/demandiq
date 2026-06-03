@@ -643,6 +643,68 @@ def _write_corridor_vmt(wb, project_state):
             _style_subheader(tcell)
             if fmt and isinstance(value, (int, float)):
                 tcell.number_format = fmt
+        r += 1
+
+        # ── Scenario block — only when an engineer reduction factor was applied ──
+        # The factor and the word "Scenario" travel onto the sheet face so the
+        # mitigated number can never be read as the unmitigated forecast. Omitted
+        # entirely when no factor was supplied.
+        sceno = vmt.get('scenario')
+        if sceno:
+            r += 1  # spacer
+            factor_pct = f"{sceno['factor'] * 100:g}%"
+            _merge_banner(r, f'Scenario — demand reduction {factor_pct} '
+                             f'(engineer assumption, applied not generated)')
+            r += 1
+            estimated = bool(sceno.get('daily_estimated'))
+            pct = sceno.get('pct')
+            pct_str = f'{pct * 100:.1f}%' if isinstance(pct, (int, float)) else MISSING
+            srows = [
+                ('Baseline VMT (veh-mi)', sceno.get('baseline_vmt'), VMT_NUM),
+                ('Scenario VMT (veh-mi)', sceno.get('vmt'), VMT_NUM),
+                ('Δ VMT (veh-mi)', sceno.get('delta'), '+#,##0;-#,##0;0'),
+                ('Δ %', pct_str, None),
+            ]
+            for label, value, fmt in srows:
+                _style_subheader(ws.cell(row=r, column=1, value=label))
+                vc = ws.cell(row=r, column=2, value=value)
+                _style_data(vc, align=LEFT,
+                            fmt=fmt if isinstance(value, (int, float)) else None)
+                ws.merge_cells(start_row=r, start_column=2, end_row=r, end_column=NCOLS)
+                r += 1
+
+            # Daily scenario rows carry the SAME asterisk discipline as base daily.
+            if sceno.get('daily_vmt') is not None:
+                for label, value in (('Daily baseline VMT (veh-mi)', sceno.get('daily_baseline_vmt')),
+                                     ('Daily scenario VMT (veh-mi)', sceno.get('daily_vmt')),
+                                     ('Daily Δ VMT (veh-mi)', sceno.get('daily_delta'))):
+                    _style_subheader(ws.cell(row=r, column=1, value=label))
+                    if estimated and value is not None:
+                        vc = ws.cell(row=r, column=2, value=f'{value:,.0f}*')
+                        _style_data(vc, align=LEFT)
+                    else:
+                        vc = ws.cell(row=r, column=2, value=value)
+                        _style_data(vc, align=LEFT,
+                                    fmt=VMT_NUM if isinstance(value, (int, float)) else None)
+                    ws.merge_cells(start_row=r, start_column=2, end_row=r, end_column=NCOLS)
+                    r += 1
+
+            # Per-link baseline-vs-scenario breakdown.
+            r += 1
+            for col, label in enumerate(['From', 'To', 'Baseline VMT', 'Scenario VMT', 'Δ VMT'], start=1):
+                _style_header(ws.cell(row=r, column=col, value=label))
+            r += 1
+            for lk in sceno.get('links') or []:
+                _style_data(ws.cell(row=r, column=1, value=lk.get('from_num')), fmt='0')
+                _style_data(ws.cell(row=r, column=2, value=lk.get('to_num')), fmt='0')
+                _style_data(ws.cell(row=r, column=3, value=lk.get('baseline_future_vmt')), fmt=VMT_NUM)
+                _style_data(ws.cell(row=r, column=4, value=lk.get('scenario_future_vmt')), fmt=VMT_NUM)
+                dcell = ws.cell(row=r, column=5, value=lk.get('delta'))
+                _style_data(dcell, fmt='+#,##0;-#,##0;0')
+                if isinstance(lk.get('delta'), (int, float)) and lk['delta'] < 0:
+                    dcell.font = NEG_FONT
+                r += 1
+
         r += 2  # spacer before the next period
 
     # Column widths.
