@@ -162,6 +162,30 @@ def test_run_happy_path():
     # VMT rides along in the run response (no corridor links here → empty corridor).
     assert am["vmt"]["unit"] == "veh-mi"
     assert am["vmt"]["corridor"]["link_count"] == 0
+    # No scenario factor supplied → no scenario block (baseline only).
+    assert am["vmt"]["scenario"] is None
+
+
+def test_run_scenario_factor_threads_through():
+    payload = _run_payload(periods=("AM",))
+    payload["scenario_reduction_factor"] = 0.10
+    r = client.post("/forecast/run", json=payload)
+    assert r.status_code == 200
+    sc = r.json()["AM"]["vmt"]["scenario"]
+    assert sc is not None and sc["factor"] == 0.10
+    assert sc["basis"] == "peak_hour"
+
+
+def test_run_scenario_factor_out_of_range_400():
+    payload = _run_payload(periods=("AM",))
+    payload["scenario_reduction_factor"] = 1.5      # ≥ 1 is invalid
+    assert client.post("/forecast/run", json=payload).status_code == 400
+
+
+def test_run_scenario_factor_non_numeric_400():
+    payload = _run_payload(periods=("AM",))
+    payload["scenario_reduction_factor"] = "lots"
+    assert client.post("/forecast/run", json=payload).status_code == 400
 
 
 # ── Integration: real ingest-match end to end (gated) ─────────────────────────

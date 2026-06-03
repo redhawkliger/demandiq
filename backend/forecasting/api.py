@@ -156,6 +156,16 @@ def run_forecast(payload: dict):
         except (TypeError, ValueError):
             raise HTTPException(status_code=400, detail="vmt_expansion_factor must be numeric")
 
+    # Scenario demand-reduction factor — the engineer's mitigation assumption,
+    # applied to the forecast volumes (the tool never generates one). Range is
+    # validated inside corridor_vmt (0 < f < 1 → ValueError → 400 below).
+    scenario_factor = payload.get("scenario_reduction_factor")
+    if scenario_factor is not None:
+        try:
+            scenario_factor = float(scenario_factor)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="scenario_reduction_factor must be numeric")
+
     out = {}
     for p in periods:
         if p not in ("AM", "PM"):
@@ -169,7 +179,8 @@ def run_forecast(payload: dict):
             p2 = balance_future(futures, links, coords=coords, method=method)
             vmt = corridor_vmt(links, coords, matches, base_layer, horizon_layer,
                                tmcs, p2["balanced"], rr, period,
-                               expansion_factor=vmt_factor)
+                               expansion_factor=vmt_factor,
+                               scenario_factor=scenario_factor)
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
         out[p] = {
