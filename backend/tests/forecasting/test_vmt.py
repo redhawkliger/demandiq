@@ -142,6 +142,62 @@ def test_network_rollup_equals_corridor():
     assert out["corridor"]["link_count"] == 1
 
 
+# ── Scenario VMT — engineer demand-reduction factor (tool applies, never generates) ──
+def test_scenario_scales_future_by_one_minus_factor():
+    out = _run(scenario_factor=0.10)
+    base_fut = out["corridor"]["future_vmt"]        # 2700 (unmitigated forecast)
+    sc = out["scenario"]
+    assert sc["factor"] == 0.10
+    assert sc["baseline_vmt"] == pytest.approx(base_fut)
+    assert sc["vmt"] == pytest.approx(base_fut * 0.90)        # 2430 mitigated
+    assert sc["delta"] == pytest.approx(-270.0)              # ≤ 0
+    assert sc["pct"] == pytest.approx(-0.10)
+    # Baseline corridor is untouched by the scenario.
+    assert out["corridor"]["future_vmt"] == pytest.approx(2700.0)
+
+
+def test_scenario_per_link_scaled():
+    sc = _run(scenario_factor=0.25)["scenario"]
+    lk = sc["links"][0]
+    assert lk["scenario_future_vmt"] == pytest.approx(lk["baseline_future_vmt"] * 0.75)
+    assert lk["delta"] == pytest.approx(-lk["baseline_future_vmt"] * 0.25)
+
+
+def test_scenario_absent_when_no_factor():
+    out = _run()
+    assert out["scenario"] is None
+    # Baseline byte-identical whether or not the scenario path could have run.
+    assert out["corridor"] == _run()["corridor"]
+
+
+def test_scenario_factor_zero_is_no_scenario():
+    assert _run(scenario_factor=0.0)["scenario"] is None
+
+
+def test_scenario_factor_out_of_range_raises():
+    for bad in (1.0, 1.5, -0.2):
+        with pytest.raises(ValueError):
+            _run(scenario_factor=bad)
+
+
+def test_scenario_daily_inherits_data_derived_no_asterisk():
+    sc = _run(scenario_factor=0.10)["scenario"]
+    assert sc["daily_estimated"] is False                    # data-derived ratio
+    assert sc["expansion_factor"] is None
+    assert sc["daily_vmt"] == pytest.approx(sc["daily_baseline_vmt"] * 0.90)
+    assert sc["daily_delta"] == pytest.approx(-(sc["daily_baseline_vmt"] * 0.10))
+
+
+def test_scenario_daily_inherits_factor_estimated_asterisk():
+    # No model period flow → daily is engineer-factor-estimated; scenario inherits it.
+    flat = _two_link_layer(total_flow=0, ab_am=0, ba_am=0)
+    sc = _run(base=flat, horizon=flat, expansion_factor=0.1,
+              scenario_factor=0.10)["scenario"]
+    assert sc["daily_estimated"] is True
+    assert sc["expansion_factor"] == 0.1
+    assert sc["daily_vmt"] == pytest.approx(sc["daily_baseline_vmt"] * 0.90)
+
+
 # ── Integration: real SANDAG pipeline (gated) ─────────────────────────────────
 from pathlib import Path  # noqa: E402
 
