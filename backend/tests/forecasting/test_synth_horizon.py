@@ -30,6 +30,11 @@ def test_generator_scales_per_class_and_guards_force(synthetic_sandag_gdf, tmp_p
         for c in FLOW_COLUMNS:
             assert o[c] == pytest.approx(b[c] * factor), f"id {hid} col {c}"
 
+    # total_flow stays consistent with Σ period flows after scaling.
+    o58 = out[out["hwycov_id"] == 58].iloc[0]
+    period_cols = [c for c in FLOW_COLUMNS if c != "total_flow"]
+    assert o58["total_flow"] == pytest.approx(sum(o58[c] for c in period_cols))
+
     # Invariants: ids/geometry untouched; the input frame is NOT mutated.
     assert list(out["hwycov_id"]) == list(base["hwycov_id"])
     assert out.geometry.geom_equals(base.geometry).all()
@@ -105,7 +110,8 @@ def test_differential_growth_through_pipeline(synthetic_sandag_gdf, project_poin
     mr = match_network_to_legs(pts, layers_fwy["base"])
     counts = {n: {m: 100 for m in _ALL12}}
     rr = refine_corridor(mr, layers_fwy["base"], layers_fwy["horizon"], counts, Period.AM)
-    [r] = rr
+    assert len(rr) == 1
+    r = rr[0]
     bound = [d for d in ("NB", "SB", "EB", "WB") if r["approaches"][d]["status"] == "bound"]
     assert bound, "expected at least one bound leg on the synthetic node"
     grew = False
