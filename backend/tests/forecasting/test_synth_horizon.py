@@ -144,3 +144,38 @@ def test_differential_growth_through_pipeline(synthetic_sandag_gdf, project_poin
              if rx["approaches"][d].get("inbound")
              for f in (rx["approaches"][d]["inbound"].get("flags") or [])]
     assert "REFINE-GROWTH-OUTLIER" in codes, f"expected outlier flag; got {codes}"
+
+
+from pathlib import Path  # noqa: E402
+
+REAL_SHP = Path(__file__).resolve().parents[3] / "data" / "sandag" / "hwyLoad.shp"
+
+
+@pytest.mark.skipif(not REAL_SHP.exists(),
+                    reason="real SANDAG hwyLoad.shp not present (local-only)")
+def test_real_file_smoke(tmp_path):
+    """Generate a synthetic 2030 from the REAL base, ingest base + horizon, and
+    confirm non-identity growth + a passing overlap/ID-stability check end-to-end.
+    Skipped on CI exactly like the other real-file gated tests."""
+    from forecasting.ingest import ingest_networks
+    from forecasting.matcher import match_network_to_legs
+    from forecasting.refinement import refine_corridor
+    from forecasting.pass1 import forecast_corridor
+
+    horizon = tmp_path / "hwyLoad_2030_synthetic.shp"
+    synthesize_horizon_shp(str(REAL_SHP), str(horizon))
+
+    lat, lng = 32.624067, -116.959736                      # DISCOVERY FALLS node
+    pts = [{"num": 1, "lat": lat, "lng": lng}]
+    # ingest_networks runs base↔horizon overlap check internally; identical
+    # link_ids → ~100% overlap → no raise (proves the generator preserved ids).
+    layers = ingest_networks(pts, [
+        {"role": "base",    "scenario_year": 2025, "path": str(REAL_SHP)},
+        {"role": "horizon", "scenario_year": 2030, "path": str(horizon)},
+    ])
+    mr = match_network_to_legs(pts, layers["base"])
+    counts = {1: {m: 100 for m in _ALL12}}
+    rr = refine_corridor(mr, layers["base"], layers["horizon"], counts, Period.AM)
+    futures, _ = forecast_corridor(rr, counts)
+    # Non-identity: at least one future movement exceeds the flat base count.
+    assert max(futures[1].values()) > 100
