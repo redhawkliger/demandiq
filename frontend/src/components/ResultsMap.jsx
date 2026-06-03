@@ -3,6 +3,8 @@ import { MapContainer, TileLayer, ZoomControl, useMap } from 'react-leaflet'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 
+import { buildCorridorSegments } from '../lib/corridorSegments'
+
 const TILE_URL =
   'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
 const TILE_ATTR =
@@ -67,20 +69,18 @@ function buildPopupHTML(it, period, viewMode) {
 
 // ── Imperative layer manager — three small effects to avoid the
 // click→select→rebuild→popup-close race.
-function ResultsLayers({ intersections, selectedId, onSelect, period, viewMode }) {
+function ResultsLayers({ intersections, links, selectedId, onSelect, period, viewMode }) {
   const map = useMap()
   const markersById = useRef(new Map())
-  const polylineRef = useRef(null)
+  const linesRef = useRef([])
   const initialFitRef = useRef(false)
 
-  // Effect 1: build/rebuild markers + polyline when the intersection list changes.
+  // Effect 1: build/rebuild markers + corridor links when inputs change.
   useEffect(() => {
     markersById.current.forEach((m) => m.remove())
     markersById.current = new Map()
-    if (polylineRef.current) {
-      polylineRef.current.remove()
-      polylineRef.current = null
-    }
+    linesRef.current.forEach((l) => l.remove())
+    linesRef.current = []
 
     intersections.forEach((it) => {
       const m = L.marker([it.lat, it.lng], {
@@ -95,16 +95,19 @@ function ResultsLayers({ intersections, selectedId, onSelect, period, viewMode }
       markersById.current.set(it.id, m)
     })
 
-    if (intersections.length >= 2) {
-      polylineRef.current = L.polyline(
-        intersections.map((it) => [it.lat, it.lng]),
-        { color: '#0A84FF', weight: 2.5, opacity: 0.85, dashArray: '6, 6', interactive: false }
-      ).addTo(map)
+    // Corridor topology comes from the explicit `links` graph (the SAME source
+    // S2/MapView uses) — never array/numeric order, which drifts from the real
+    // corridor (e.g. would draw 4→3 instead of 4→2). See lib/corridorSegments.
+    for (const seg of buildCorridorSegments(intersections, links)) {
+      const line = L.polyline([seg.from, seg.to], {
+        color: '#0A84FF', weight: 2.5, opacity: 0.85, dashArray: '6, 6', interactive: false,
+      }).addTo(map)
+      linesRef.current.push(line)
     }
     // We intentionally omit selectedId / period / viewMode here — those are
     // handled by the next two effects without rebuilding markers.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [intersections, map])
+  }, [intersections, links, map])
 
   // Effect 2: when selectedId changes, swap each marker's icon. No rebuild =
   // open popups don't close, and the just-clicked pin keeps its popup open.
@@ -147,7 +150,7 @@ function ResultsLayers({ intersections, selectedId, onSelect, period, viewMode }
   useEffect(() => {
     return () => {
       markersById.current.forEach((m) => m.remove())
-      if (polylineRef.current) polylineRef.current.remove()
+      linesRef.current.forEach((l) => l.remove())
     }
   }, [])
 
@@ -173,6 +176,7 @@ function NorthArrow() {
 
 export default function ResultsMap({
   intersections,
+  links = [],
   selectedId,
   onSelect,
   period,
@@ -191,6 +195,7 @@ export default function ResultsMap({
       <ZoomControl position="bottomright" />
       <ResultsLayers
         intersections={intersections}
+        links={links}
         selectedId={selectedId}
         onSelect={onSelect}
         period={period}
