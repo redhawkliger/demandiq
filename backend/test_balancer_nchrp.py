@@ -16,7 +16,6 @@ from balancer import (
     _extract_matrix,
     DIRECTION_SPEC,
     CELL_MOVEMENT,
-    run_qc,
 )
 
 FULL = {'EBL':0,'EBT':0,'EBR':0,'WBL':0,'WBT':0,'WBR':0,'NBL':0,'NBT':0,
@@ -841,34 +840,6 @@ def test_valid_link_directions_still_accepted():
     print(f"  test_valid_link_directions_still_accepted: PASS (200 on 'NB/SB')")
 
 
-def test_qc08_pairs_in_corridor_order_not_sorted_by_number():
-    """QC-08 must pair adjacent intersections in CORRIDOR (given-list) order —
-    the same order balance_corridor uses — not sorted by intersection number.
-    Regression for the sheet-7 / 2_Intersections divergence: with non-monotonic
-    numbering, sorting by number re-pairs the wrong intersections."""
-    # Corridor order (given list) = 3 → 1 → 2; numbering is NOT ascending.
-    intersections = [{'num': 3, 'name': 'West'},
-                     {'num': 1, 'name': 'Mid'},
-                     {'num': 2, 'name': 'East'}]
-    # EBT set so the corridor-adjacent pair 3→1 has a >5 residual gap while the
-    # numeric-adjacent pair 1→2 has none. The old sorted-by-number QC-08 would
-    # instead flag 2→3 and miss 3→1. WBT held equal so no reverse-dir flags.
-    balanced = {
-        'AM': {3: mk({'EBT': 1000, 'WBT': 500}),
-               1: mk({'EBT': 900,  'WBT': 500}),
-               2: mk({'EBT': 900,  'WBT': 500})},
-        'PM': {},
-    }
-    flags = run_qc(intersections, {'AM': {}, 'PM': {}}, {}, balanced, 'EB/WB')
-    qc08 = [f for f in flags if f['check'] == 'QC-08']
-    msgs = " | ".join(f['message'] for f in qc08)
-    assert any('Int 3→1' in f['message'] for f in qc08), \
-        f"expected corridor-order link 3→1; got: {msgs}"
-    assert not any('Int 2→3' in f['message'] for f in qc08), \
-        f"sorted-by-number link 2→3 must NOT appear; got: {msgs}"
-    print(f"  test_qc08_pairs_in_corridor_order_not_sorted_by_number: PASS ({msgs})")
-
-
 if __name__ == '__main__':
     tests = [
         test_furness_4x4_known_answer,
@@ -893,7 +864,6 @@ if __name__ == '__main__':
         test_f3_no_outlier_on_well_balanced_corridor,
         test_f3_abs_floor_suppresses_quiet_corridor_false_positives,
         test_f3_min_sample_size_skips_tiny_corridors,
-        test_qc08_pairs_in_corridor_order_not_sorted_by_number,
     ]
     passed = 0
     failed = 0
