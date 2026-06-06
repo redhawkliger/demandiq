@@ -56,7 +56,10 @@ def test_vmt_scenario_and_daily_invariants(case):
     # corridor_vmt rounds outputs to 1 decimal place. The scenario re-runs with
     # unrounded volumes, then rounds; baseline_vmt echoes the already-rounded
     # future VMT. The two rounding operations (one on x, one on x*(1-f)) each
-    # contribute up to 0.05, so the total tolerance is 0.1 per corridor segment.
+    # contribute up to 0.05, so the total tolerance is 0.1. NOTE: this bound
+    # assumes g.vmt_case() yields a SINGLE-segment corridor (one round on each
+    # side). If that generator ever grows to multi-segment corridors, revisit the
+    # tolerance — per-segment rounding can accumulate.
     sc = out["scenario"]
     assert sc is not None
     assert sc["vmt"] == _approx(sc["baseline_vmt"] * (1.0 - factor), tol=0.1)
