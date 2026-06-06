@@ -24,12 +24,14 @@ _pos = st.floats(min_value=1.0, max_value=1000.0,
 # ── 1. East-west corridor for the balancer (balance_future) ───────────────────
 @st.composite
 def ew_corridor(draw):
-    """k intersections with DISTINCT, deliberately unsorted numbers, laid out
-    west->east (increasing lng). Links connect consecutive intersections in the
-    GIVEN order. Returns (nums, coords, links, volumes)."""
+    """k intersections with DISTINCT intersection numbers in arbitrary order (a
+    permutation, so frequently NOT sorted) — this is what exercises the
+    corridor-order invariant downstream. Links connect consecutive intersections
+    in the GIVEN order. Returns (nums, coords, links, volumes)."""
     k = draw(st.integers(min_value=2, max_value=6))
     nums = draw(st.lists(st.integers(min_value=1, max_value=99),
                          min_size=k, max_size=k, unique=True))
+    nums = draw(st.permutations(nums))   # arbitrary order — exercises corridor-order invariant #6
     coords = {n: {"lat": 32.72, "lng": -117.20 + 0.01 * i}
               for i, n in enumerate(nums)}
     links = [{"fromNum": nums[i], "toNum": nums[i + 1],

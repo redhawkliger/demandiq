@@ -23,7 +23,7 @@ def test_spine_layers_are_valid(case):
     base, horizon, intersections, counts, growth = case
     assert isinstance(base, NetworkLayer)            # pydantic validation passed (unique link_id)
     assert isinstance(horizon, NetworkLayer)
-    assert set(counts[1]) >= set(g.ALL12)
+    assert set(counts[1]) == set(g.ALL12)
     assert growth > 0
 
 
