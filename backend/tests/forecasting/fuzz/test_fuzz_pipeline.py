@@ -72,3 +72,18 @@ def _approx(x, tol=1e-6):
         def __eq__(self, other):
             return abs(other - x) <= tol + 1e-9 * abs(x)
     return _A()
+
+
+from hypothesis import strategies as st   # noqa: E402
+
+
+# Invariant #5 — U-turn volumes pass through Pass 1 unchanged (the 4x4 IPF has no
+# U-turn cell, so a seeded U-turn must equal its output value exactly).
+@given(g.single_intersection_spine(identity=False), st.integers(min_value=0, max_value=500))
+def test_uturn_passthrough(case, nbu):
+    base, horizon, intersections, counts, growth = case
+    counts = {1: dict(counts[1], NBU=nbu)}              # inject a North-bound U-turn seed
+    mr = match_network_to_legs(intersections, base)
+    rr = refine_corridor(mr, base, horizon, counts, Period.AM)
+    futures, _ = forecast_corridor(rr, counts)
+    assert futures[1]["NBU"] == float(nbu)              # carried through unchanged
