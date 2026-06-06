@@ -1,0 +1,27 @@
+name: Fuzz — nightly deep run
+
+# Deep, randomized property exploration. Fails loudly in the Actions tab on a
+# violation; it does NOT open issues or modify the repo.
+on:
+  schedule:
+    - cron: '0 8 * * *'        # 08:00 UTC daily
+  workflow_dispatch:           # allow manual runs
+
+jobs:
+  fuzz:
+    name: Math-soundness fuzz (nightly profile)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - name: Deep fuzz run
+        env:
+          HYPOTHESIS_PROFILE: nightly
+          ANTHROPIC_API_KEY: placeholder-not-used-by-tested-endpoints
+        run: python -m pytest tests/forecasting/fuzz/ -q --hypothesis-show-statistics
