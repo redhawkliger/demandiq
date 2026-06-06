@@ -60,7 +60,7 @@ backend/tests/forecasting/fuzz/
   test_fuzz_balancer.py  # focused: furness_intersection + balance_nchrp properties
   test_fuzz_pipeline.py  # spine: end-to-end corridor, stage-by-stage invariants
   conftest.py            # Hypothesis profiles: "ci" (deterministic) vs "nightly" (deep)
-  .hypothesis/           # committed failure DB — counterexamples auto-replay as regression pins
+  .hypothesis/           # per-developer example cache — GITIGNORED (see §4)
 ```
 
 ## 3. Invariants Asserted
@@ -73,11 +73,11 @@ engine's own contract.
 | 1 | Link conservation | `balancer.py:644` / `:1206` | every Full directed link: `upstream_outflow == downstream_inflow` (delta 0 post-round, within `tol`) |
 | 2 | Non-negativity | `balancer.py:1093`, `refinement.py:109` | all movement volumes, VMT, refined futures ≥ 0 |
 | 3 | Round-to-5 | `balance_nchrp(round_to_5=True)` | every balanced movement ≡ 0 (mod 5) |
-| 4 | IPF convergence | `balancer.py:541` | balanced intersection returns `converged=True`, `final_residual < tol` |
+| 4 | IPF convergence | `balancer.py:541` | on consistent margins, returns `converged=True` with `final_residual` finite & ≥ 0, and every cell finite & non-negative. (NOTE: convergence is *matrix stability*, NOT target satisfaction — `converged=True` does not imply `residual < tol`; see `test_pass1.test_in_out_imbalance_residual`. A residual<tol assertion would over-claim.) |
 | 5 | U-turn passthrough | `pass1.py:116` | U-turn volumes identical seed → output |
 | 6 | Corridor-order invariant | `balancer.py:103` + memory | links follow given intersection order under random permutation — never sorted by int number |
 | 7 | Identity-growth conservation | `test_pass2.py:86` | horizon == base ⇒ refined futures ≈ base counts (within `tol`) |
-| 8 | VMT scenario linearity | `vmt.py:208` | `scenario_vmt ≈ baseline_vmt × (1 − scenario_factor)` |
+| 8 | VMT scenario linearity | `vmt.py:208` | `scenario_vmt ≈ baseline_vmt × (1 − scenario_factor)` within `0.1` (two independent round-to-1-decimal steps → 0.05 + 0.05; bound holds for the single-segment VMT generator) |
 | 9 | total_flow identity | commit `ab9b821` | `total_flow == Σ directional/period flows` |
 | 10 | Daily-VMT all-or-none | `vmt.py:191` | daily VMT fields never partially populated across a corridor (all segments have a ratio, or none reported) |
 
@@ -90,9 +90,11 @@ growth factors < 1 are valid model inputs, so it is not a sound invariant.
   - `ci` — `derandomize=True`, ~150 examples, `deadline` set. Fully deterministic, zero
     flakes in the PR gate.
   - `nightly` — ~5000 examples, randomized, `deadline=None`. Deep exploration.
-- **Failure database** committed to `backend/tests/forecasting/fuzz/.hypothesis/`. Any
-  counterexample found by the nightly run auto-replays in every subsequent CI run — a
-  regression pin with no manual `@example` bookkeeping.
+- **Example-DB policy.** Hypothesis writes a per-developer `.hypothesis/` example cache;
+  this is **gitignored**, not committed (a per-developer cache blob does not belong in git).
+  When the nightly bot surfaces a counterexample, the regression is pinned explicitly with a
+  committed `@example(...)` on the relevant property — an auditable, reviewable pin rather
+  than an opaque cache artifact.
 - **Float comparisons** use the engine's native `tol=0.5`, not exact equality, so assertions
   hold to the precision the engine itself targets.
 
