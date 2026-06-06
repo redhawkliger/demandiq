@@ -53,3 +53,10 @@ jobs:
           # satisfies the import check with zero real API calls.
           ANTHROPIC_API_KEY: placeholder-not-used-by-tested-endpoints
         run: PYTHON=python ./run_tests.sh
+      - name: Forecasting + fuzz suite (pytest)
+        env:
+          HYPOTHESIS_PROFILE: ci
+        # Geo-dependent tests (real + synthetic shapefile) skip cleanly without
+        # the geo stack, which CI does not install. The numeric pipeline and the
+        # fuzz bot are pure Python and run here as a blocking gate.
+        run: python -m pytest tests/forecasting/ -q
