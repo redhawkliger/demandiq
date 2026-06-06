@@ -111,3 +111,50 @@ def consistent_ipf(draw):
     col_t = [total * f / s for f in raw_col]           # rescale to match row total
     present = [True, True, True, True]
     return M, row_t, col_t, present
+
+
+# ── 4. Two-link EB/WB segment for corridor_vmt ────────────────────────────────
+from forecasting.contract import NetworkLink as _NL   # local alias for clarity
+
+_VMT_CORRIDOR = [{"fromNum": 1, "toNum": 2, "direction": "EB/WB"}]
+_VMT_COORDS = {1: {"lat": 32.72, "lng": -117.20}, 2: {"lat": 32.72, "lng": -117.10}}
+_VMT_MATCHES = [{"intersection_num": 1, "snapped_node": 100, "legs": {}},
+                {"intersection_num": 2, "snapped_node": 200, "legs": {}}]
+
+
+def _vmt_link(lid, fn, tn, total_flow, ab_am, ba_am):
+    return _NL(link_id=lid, from_node=fn, to_node=tn,
+              geometry=[(0.0, 0.0), (0.01, 0.0)],
+              from_node_xy=(0.0, 0.0), to_node_xy=(0.01, 0.0),
+              length_mi=0.5, daily_total=total_flow,
+              flow=DirectionalFlow(ab={Period.AM: ab_am}, ba={Period.AM: ba_am}))
+
+
+def _vmt_layer(total_flow, ab_am, ba_am):
+    # 100 -> 150 -> 200, each 0.5 mi (chain length 1.0).
+    return NetworkLayer(region="SANDAG", source_crs_epsg=2230, crs_epsg=4326,
+                        scenario_year=2025, links=[
+                            _vmt_link("L1", 100, 150, total_flow, ab_am, ba_am),
+                            _vmt_link("L2", 150, 200, total_flow, ab_am, ba_am)])
+
+
+@st.composite
+def vmt_case(draw):
+    """Returns (layer, existing, future, scenario_factor). Flows are non-negative;
+    future = existing scaled by a growth factor; scenario_factor in (0,1)."""
+    ebt = float(draw(_count)); wbt = float(draw(_count))
+    grow = draw(st.floats(min_value=1.0, max_value=2.0,
+                          allow_nan=False, allow_infinity=False))
+    total_flow = draw(st.integers(min_value=0, max_value=20000))
+    layer = _vmt_layer(total_flow, ebt or 1.0, wbt or 1.0)
+    existing = {1: {"EBT": ebt, "WBT": wbt}, 2: {"EBT": ebt, "WBT": wbt}}
+    future = {1: {"EBT": ebt * grow, "WBT": wbt * grow},
+              2: {"EBT": ebt * grow, "WBT": wbt * grow}}
+    factor = draw(st.floats(min_value=0.01, max_value=0.99,
+                            allow_nan=False, allow_infinity=False))
+    return layer, existing, future, factor
+
+
+VMT_CORRIDOR = _VMT_CORRIDOR
+VMT_COORDS = _VMT_COORDS
+VMT_MATCHES = _VMT_MATCHES

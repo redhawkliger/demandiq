@@ -36,3 +36,39 @@ def test_identity_growth_conserves_counts(case):
     for vols in res["balanced"].values():               # #3 round-to-5 holds end-to-end
         for v in vols.values():
             assert v >= 0 and v % 5 == 0
+
+
+from forecasting.vmt import corridor_vmt   # noqa: E402
+
+
+# Invariants #8 (scenario linearity), #10 (daily all-or-none), #2 (non-negativity).
+@given(g.vmt_case())
+def test_vmt_scenario_and_daily_invariants(case):
+    layer, existing, future, factor = case
+    out = corridor_vmt(g.VMT_CORRIDOR, g.VMT_COORDS, g.VMT_MATCHES, layer, layer,
+                       existing, future, [], Period.AM, scenario_factor=factor)
+    c = out["corridor"]
+
+    # #2 non-negativity of peak-hour VMT.
+    assert c["existing_vmt"] >= 0 and c["future_vmt"] >= 0
+
+    # #8 scenario VMT is within rounding of baseline * (1 - factor).
+    # corridor_vmt rounds outputs to 1 decimal place. The scenario re-runs with
+    # unrounded volumes, then rounds; baseline_vmt echoes the already-rounded
+    # future VMT. The two rounding operations (one on x, one on x*(1-f)) each
+    # contribute up to 0.05, so the total tolerance is 0.1 per corridor segment.
+    sc = out["scenario"]
+    assert sc is not None
+    assert sc["vmt"] == _approx(sc["baseline_vmt"] * (1.0 - factor), tol=0.1)
+    assert sc["baseline_vmt"] == _approx(c["future_vmt"])
+
+    # #10 daily fields are all-or-none, never partially populated.
+    daily_fields = [c["daily_existing_vmt"], c["daily_future_vmt"]]
+    assert all(x is None for x in daily_fields) or all(x is not None for x in daily_fields)
+
+
+def _approx(x, tol=1e-6):
+    class _A:
+        def __eq__(self, other):
+            return abs(other - x) <= tol + 1e-9 * abs(x)
+    return _A()
