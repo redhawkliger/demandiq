@@ -115,6 +115,63 @@ def test_3leg_t_intersection():
     print(f"  test_3leg_t_intersection: PASS (W leg masked, converged in {iters} iter)")
 
 
+# ─── Test 3b — no phantom movement on an absent leg forced by a Full link ────
+def test_no_phantom_movement_on_absent_leg():
+    """Regression for the int-7 phantom-EBT bug. Int 7 is a 3-leg T on an E-W
+    corridor: legs W, N, S — there is NO E leg. So every E-leg movement is raw 0:
+    EBT/SBL/NBR (which exit east) and WBL/WBT/WBR (which approach from the east).
+    A Full EB/WB link 7->8 sits on the (absent) E side; the east neighbour pulls
+    demand through it. The Stage 4c.3 post-round reconciliation must NOT invent
+    eastbound-through flow on a leg that physically doesn't exist — raw EBT 0 must
+    stay balanced EBT 0 (likewise SBL, NBR, the other two E-exit movements).
+
+    Before the fix, reconciliation dumps the link's canonical volume into EBT
+    (first cell of DIRECTION_SPEC['EB']['outflow']) because it never checks raw-leg
+    presence, yielding a conservation-clean, unflagged phantom (~200+ veh)."""
+    int7 = mk({
+        'EBL': 80, 'EBR': 70,            # W-approach turns onto N/S (EBT=0: no E exit)
+        'NBT': 300, 'NBL': 60,           # S-approach: through N + left to W (NBR=0: no E)
+        'SBT': 290, 'SBR': 40,           # N-approach: through S + right to W (SBL=0: no E)
+    })
+    int8 = mk({                          # real east neighbour with EB approach demand
+        'EBL': 20, 'EBT': 400, 'EBR': 20, 'NBL': 50, 'NBT': 300, 'NBR': 40,
+        'SBL': 45, 'SBT': 290, 'SBR': 35, 'WBL': 40, 'WBT': 260, 'WBR': 30,
+    })
+    raw = {7: int7, 8: int8}
+    links = [{'fromNum': 7, 'toNum': 8, 'direction': 'EB/WB', 'mode': 'Full'}]
+    coords = {7: {'lat': 32.90, 'lng': -117.05}, 8: {'lat': 32.90, 'lng': -117.04}}  # 7 west of 8
+
+    res = balance_nchrp(raw, links, method='larger', coords=coords, round_to_5=True)
+    b7 = res['balanced'][7]
+    # All three movements exit via the absent E leg → none can carry flow.
+    assert b7['EBT'] == 0, f"phantom EBT={b7['EBT']} invented on an absent E leg"
+    assert b7['SBL'] == 0, f"phantom SBL={b7['SBL']} invented on an absent E leg"
+    assert b7['NBR'] == 0, f"phantom NBR={b7['NBR']} invented on an absent E leg"
+
+    # The infeasibility is SURFACED, not silently balanced: int 7's E-outflow
+    # stays 0, the link delta stays VISIBLE, and a NCHRP-LINK-NOLEG flag names it.
+    eb = next((c for c in res['link_conservation']
+               if c['fromNum'] == 7 and c['toNum'] == 8 and c['direction'] == 'EB'), None)
+    assert eb is not None, "expected link 7→8 EB in the conservation table"
+    assert eb['upstream_outflow'] == 0, f"int 7 E-outflow must be 0, got {eb['upstream_outflow']}"
+    assert abs(eb['delta']) > 0.5, f"infeasible link delta must stay visible, got {eb['delta']}"
+
+    # The FEASIBLE endpoint (int 8) must NOT be corrupted toward the phantom-0
+    # side: its real eastbound approach (raw 440) is preserved (~435 after IPF +
+    # round), never reconciled down toward int 7's structural 0.
+    b8 = res['balanced'][8]
+    assert b8['EBL'] + b8['EBT'] + b8['EBR'] >= 430, \
+        f"int 8 real W-approach corrupted to {b8['EBL'] + b8['EBT'] + b8['EBR']} (expected ~435)"
+
+    noleg = [f for f in res['qc_flags'] if f.get('check') == 'NCHRP-LINK-NOLEG' and f.get('int') == 7]
+    assert noleg, f"expected NCHRP-LINK-NOLEG for int 7; got {[f.get('check') for f in res['qc_flags']]}"
+    # Must NOT be mislabeled as a generic raw-floor delta on the same link.
+    generic = [f for f in res['qc_flags'] if f.get('check') == 'NCHRP-LINK-DELTA' and f.get('int') == 7]
+    assert not generic, f"no-leg link must not also raise NCHRP-LINK-DELTA: {generic}"
+    print("  test_no_phantom_movement_on_absent_leg: PASS "
+          "(no phantom; structural delta surfaced via NCHRP-LINK-NOLEG)")
+
+
 # ─── Test 4a — under 'larger', every balanced movement stays >= raw ─────────
 def test_larger_conserves_links_movements_may_drop():
     """Under 'larger', the guarantee that actually holds is LINK CONSERVATION,
@@ -845,6 +902,7 @@ if __name__ == '__main__':
         test_furness_4x4_known_answer,
         test_link_resolution_larger_vs_average,
         test_3leg_t_intersection,
+        test_no_phantom_movement_on_absent_leg,
         test_larger_conserves_links_movements_may_drop,
         test_average_can_go_below_raw,
         test_end_to_end_3int_corridor,

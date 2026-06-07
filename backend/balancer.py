@@ -578,7 +578,29 @@ def _round_up_5_nchrp(x, raw_x):
     return int(math.ceil(x / 5.0) * 5)
 
 
-def _adjust_leg_to_target(balanced_int, ltr_keys, raw_int, target, shared_keys=None):
+def _raw_leg_present(int_vols):
+    """RAW-demand leg presence: a leg is physically present iff its raw approach
+    OR raw outflow total is > 0. This reflects the count sheet's physical legs,
+    independent of corridor links.
+
+    balance_leg_totals marks a leg 'present' the moment a link touches it (so IPF
+    can balance linked legs), which means its mask can report a leg present even
+    when no leg physically exists — e.g. a corridor link drawn on the absent E
+    side of a T-intersection. Reconciliation must NOT use that link-augmented mask
+    to decide which movements can carry flow, or it will invent a phantom
+    movement on a non-existent leg. This raw mask is the physical-presence source.
+
+    Returns [S, N, W, E] booleans (LEG_INDEX order)."""
+    pres = [False] * 4
+    for _leg, idx in LEG_INDEX.items():
+        rt = sum(int_vols.get(k, 0) for k in DIRECTION_SPEC[LEG_IN_DIR[idx]]['approach'])
+        ct = sum(int_vols.get(k, 0) for k in DIRECTION_SPEC[LEG_OUT_DIR[idx]]['outflow'])
+        pres[idx] = (rt > 0) or (ct > 0)
+    return pres
+
+
+def _adjust_leg_to_target(balanced_int, ltr_keys, raw_int, target, shared_keys=None,
+                          leg_present=None):
     """Stage 4c.3 helper. Round each of the 3 L/T/R cells up to nearest 5
     (raw==0 stays 0), then add/subtract 5 from cells until the leg's L+T+R
     sum equals `target`.
@@ -590,26 +612,49 @@ def _adjust_leg_to_target(balanced_int, ltr_keys, raw_int, target, shared_keys=N
     touching a non-shared cell doesn't. Falls back to shared cells if
     non-shared options are exhausted.
 
+    `leg_present` is the RAW-demand leg-presence mask ([S,N,W,E]) for this
+    intersection. A cell is FILLABLE only if BOTH its approach (row) leg and its
+    exit (col) leg are raw-present — so reconciliation never invents a movement on
+    a leg the counts show doesn't physically exist (e.g. an eastbound-through cell
+    when there is no E leg). Cells on an absent leg are forced to 0 and never
+    selected. When None, every cell is fillable (legacy behavior). If no fillable
+    cell remains, the leg cannot reach a non-zero target and the shortfall is
+    returned VISIBLE (caller surfaces it as a structural link delta + flag).
+
     Cells stay non-negative multiples of 5. The raw>0⇒balanced≥5 invariant
     applies to initial rounding but is relaxed during adjustment when link
     conservation requires (rare; corridor-stub edge case).
 
-    Returns: target - final_sum.
+    Returns: target - final_sum (0 when matched; non-zero when structurally
+    unreachable).
     """
     import math
     shared = set(shared_keys or [])
-    non_shared = [k for k in ltr_keys if k not in shared]
-    shared_in_leg = [k for k in ltr_keys if k in shared]
 
-    # Initial Step-D rounding (raw==0 stays 0; else ceil to next 5)
+    def _fillable(k):
+        if leg_present is None:
+            return True
+        rc = MOVEMENT_CELL.get(k)
+        if rc is None:
+            return True
+        r, c = rc
+        return bool(leg_present[r]) and bool(leg_present[c])
+
+    valid = [k for k in ltr_keys if _fillable(k)]
+    non_shared = [k for k in valid if k not in shared]
+    shared_in_leg = [k for k in valid if k in shared]
+
+    # Initial Step-D rounding. Cells on an absent leg (not fillable) are forced to
+    # 0 — they cannot carry flow regardless of the link target. Fillable cells:
+    # raw==0 stays 0, else ceil to next 5.
     for k in ltr_keys:
-        if raw_int.get(k, 0) == 0:
+        if not _fillable(k) or raw_int.get(k, 0) == 0:
             balanced_int[k] = 0
         else:
             balanced_int[k] = int(math.ceil(balanced_int.get(k, 0) / 5.0) * 5)
 
     for _ in range(1000):
-        cur_sum = sum(balanced_int.get(k, 0) for k in ltr_keys)
+        cur_sum = sum(balanced_int.get(k, 0) for k in valid)
         if cur_sum == target:
             return 0
 
@@ -629,7 +674,8 @@ def _adjust_leg_to_target(balanced_int, ltr_keys, raw_int, target, shared_keys=N
                 return target - cur_sum     # cannot shrink further
         else:
             # Increment: prefer non-shared, then shared. Within each tier,
-            # add 5 to the largest cell.
+            # add 5 to the largest cell. No fillable cell → leave the shortfall
+            # visible (structural: the leg can't physically carry this flow).
             for tier in (non_shared, shared_in_leg):
                 if tier:
                     largest_k = max(tier, key=lambda k: balanced_int.get(k, 0))
@@ -638,7 +684,7 @@ def _adjust_leg_to_target(balanced_int, ltr_keys, raw_int, target, shared_keys=N
             else:
                 return target - cur_sum
 
-    return target - sum(balanced_int.get(k, 0) for k in ltr_keys)
+    return target - sum(balanced_int.get(k, 0) for k in valid)
 
 
 def compute_link_conservation(balanced, resolved_links, link_modes=None):
@@ -969,6 +1015,12 @@ def balance_nchrp(
                                      raw_pairs_out=raw_link_pairs)
     links_by_int = _build_links_by_int(links, coords=coords)
 
+    # Raw-demand leg presence per intersection — PHYSICAL legs from the counts,
+    # independent of corridor links. Stage 4c.3 reconciliation gates cell fills on
+    # this (not the link-augmented presence) so it never invents a movement on a
+    # leg that doesn't physically exist (the int-7 phantom-EBT class).
+    raw_leg_present = {n: _raw_leg_present(v) for n, v in raw_volumes.items()}
+
     # ── Step B Level 1: balance_leg_totals (network leg-total reconciliation)
     # Produces row/col targets that are simultaneously link-consistent and
     # intersection-conserving, so Level 2 per-int IPF hits exact targets and
@@ -1118,6 +1170,19 @@ def balance_nchrp(
             continue
         full_endpoints[(u, d, direction)] = (LEG_INDEX[u_leg], LEG_INDEX[d_leg])
 
+    # Structurally infeasible links: a Full link whose endpoint leg has NO raw
+    # demand sits on a leg that doesn't physically exist (e.g. a corridor link
+    # drawn on the absent E side of a T-intersection). Reconciliation leaves its
+    # delta visible; flag it as NCHRP-LINK-NOLEG (not the generic raw-floor
+    # NCHRP-LINK-DELTA) and don't double-report.
+    _leg_name_by_idx = {v: k for k, v in LEG_INDEX.items()}
+    noleg_links = {}    # (u, d, direction) → (absent_int, absent_leg_name)
+    for (u, d, direction), (u_leg_idx, d_leg_idx) in full_endpoints.items():
+        if not raw_leg_present.get(u, [True] * 4)[u_leg_idx]:
+            noleg_links[(u, d, direction)] = (u, _leg_name_by_idx[u_leg_idx])
+        elif not raw_leg_present.get(d, [True] * 4)[d_leg_idx]:
+            noleg_links[(u, d, direction)] = (d, _leg_name_by_idx[d_leg_idx])
+
     # Precompute which leg indices are linked at each intersection. A cell
     # at (r, c) of intersection X is "shared" with another linked leg iff
     # the OTHER axis index (the one NOT equal to the leg currently being
@@ -1154,6 +1219,14 @@ def balance_nchrp(
         for outer_it in range(RECONCILE_MAX_OUTER):
             any_change = False
             for (u, d, direction), (u_leg_idx, d_leg_idx) in full_endpoints.items():
+                # Structurally infeasible link (an endpoint leg has no raw demand
+                # → it doesn't physically exist): do NOT reconcile. Forcing the
+                # feasible endpoint toward the shared canonical would corrupt its
+                # real counts (pull them toward the phantom-0 side). Leave both
+                # endpoints at their IPF values so the FULL delta stays visible;
+                # NCHRP-LINK-NOLEG names it below.
+                if (u, d, direction) in noleg_links:
+                    continue
                 canonical = canonical_by_link[(u, d, direction)]
                 spec = DIRECTION_SPEC[direction]
 
@@ -1166,7 +1239,8 @@ def balance_nchrp(
                 u_shared = _shared_keys_outflow(u, u_keys, u_leg_idx)
                 u_sum_before = sum(balanced[u].get(k, 0) for k in u_keys)
                 _adjust_leg_to_target(balanced[u], u_keys, raw_volumes.get(u, {}),
-                                      u_target, shared_keys=u_shared)
+                                      u_target, shared_keys=u_shared,
+                                      leg_present=raw_leg_present.get(u))
                 if sum(balanced[u].get(k, 0) for k in u_keys) != u_sum_before:
                     any_change = True
 
@@ -1176,7 +1250,8 @@ def balance_nchrp(
                 d_shared = _shared_keys_approach(d, d_keys, d_leg_idx)
                 d_sum_before = sum(balanced[d].get(k, 0) for k in d_keys)
                 _adjust_leg_to_target(balanced[d], d_keys, raw_volumes.get(d, {}),
-                                      d_target, shared_keys=d_shared)
+                                      d_target, shared_keys=d_shared,
+                                      leg_present=raw_leg_present.get(d))
                 if sum(balanced[d].get(k, 0) for k in d_keys) != d_sum_before:
                     any_change = True
             if not any_change:
@@ -1208,6 +1283,9 @@ def balance_nchrp(
     for entry in link_conservation:
         if entry.get('mode') != 'Full':
             continue
+        key = (entry['fromNum'], entry['toNum'], entry['direction'])
+        if key in noleg_links:
+            continue                       # reported as NCHRP-LINK-NOLEG below
         if abs(entry['delta']) > 0.5:
             root = _geometry_root_hint(entry)
             base = (
@@ -1223,6 +1301,30 @@ def balance_nchrp(
                 'int': entry['fromNum'],
                 'message': base + tail,
             })
+
+    # NCHRP-LINK-NOLEG: a Full link forcing flow onto a leg with no raw demand —
+    # the leg doesn't physically exist (e.g. a corridor link on the absent E side
+    # of a T-intersection). The delta is STRUCTURAL, not a count error; surface it
+    # loudly instead of silently inventing a phantom through-movement.
+    for entry in link_conservation:
+        if entry.get('mode') != 'Full':
+            continue
+        key = (entry['fromNum'], entry['toNum'], entry['direction'])
+        if key not in noleg_links:
+            continue
+        absent_int, absent_leg = noleg_links[key]
+        qc_flags.append({
+            'check': 'NCHRP-LINK-NOLEG',
+            'int': absent_int,
+            'message': (
+                f"Link {entry['fromNum']}→{entry['toNum']} {entry['direction']} "
+                f"(Full): Int {absent_int} has no {absent_leg} leg (no raw demand on "
+                f"it), so it cannot carry this movement. The {entry['delta']:+.0f} veh "
+                f"delta is structural — a corridor link on a leg that doesn't "
+                f"physically exist, not a count error. Remove the link or correct "
+                f"the intersection geometry."
+            ),
+        })
 
     # NCHRP-LANDUSE-DELTA: report Land Use link deltas as informational
     for entry in link_conservation:
