@@ -172,6 +172,30 @@ def test_no_phantom_movement_on_absent_leg():
           "(no phantom; structural delta surfaced via NCHRP-LINK-NOLEG)")
 
 
+# ─── Test 3c — a no-leg link is purely informational, never forces ──────────
+def test_noleg_link_does_not_perturb_feasible_endpoint():
+    """TASK 2 (validate at resolve/leg-total time). A structurally infeasible
+    (no-leg) Full link must NOT force leg totals anywhere — not just in Stage 4c.3
+    reconciliation, but also in Level 1 (balance_leg_totals link-equality). It is
+    surfaced as NCHRP-LINK-NOLEG with a visible delta, but the balanced result of
+    its FEASIBLE endpoint must be byte-identical whether or not the broken link
+    exists. (Before TASK 2, Level 1's link-equality pulled int 8's real counts
+    toward int 7's phantom-0 side: EBT 400->395 plus five other movements.)"""
+    int7 = mk({'EBL': 80, 'EBR': 70, 'NBT': 300, 'NBL': 60, 'SBT': 290, 'SBR': 40})
+    int8 = mk({'EBL': 20, 'EBT': 400, 'EBR': 20, 'NBL': 50, 'NBT': 300, 'NBR': 40,
+               'SBL': 45, 'SBT': 290, 'SBR': 35, 'WBL': 40, 'WBT': 260, 'WBR': 30})
+    coords = {7: {'lat': 32.90, 'lng': -117.05}, 8: {'lat': 32.90, 'lng': -117.04}}
+    link = [{'fromNum': 7, 'toNum': 8, 'direction': 'EB/WB', 'mode': 'Full'}]
+
+    with_link = balance_nchrp({7: int7, 8: int8}, link, method='larger', coords=coords)['balanced'][8]
+    no_link = balance_nchrp({7: int7, 8: int8}, [], method='larger', coords=coords)['balanced'][8]
+    diff = [k for k in with_link if with_link[k] != no_link.get(k)]
+    assert not diff, f"no-leg link perturbed feasible int 8 on {diff}: " \
+        f"{ {k: (no_link[k], with_link[k]) for k in diff} }"
+    print("  test_noleg_link_does_not_perturb_feasible_endpoint: PASS "
+          "(feasible endpoint untouched by the broken link)")
+
+
 # ─── Test 4a — under 'larger', every balanced movement stays >= raw ─────────
 def test_larger_conserves_links_movements_may_drop():
     """Under 'larger', the guarantee that actually holds is LINK CONSERVATION,
@@ -903,6 +927,7 @@ if __name__ == '__main__':
         test_link_resolution_larger_vs_average,
         test_3leg_t_intersection,
         test_no_phantom_movement_on_absent_leg,
+        test_noleg_link_does_not_perturb_feasible_endpoint,
         test_larger_conserves_links_movements_may_drop,
         test_average_can_go_below_raw,
         test_end_to_end_3int_corridor,

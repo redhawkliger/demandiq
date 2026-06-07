@@ -333,6 +333,14 @@ def balance_leg_totals(
         col_t[int_num] = ct
         present_t[int_num] = pres
 
+    # RAW-demand presence, snapshotted BEFORE any link marks a leg present. Used
+    # to drop structurally-infeasible links (a link whose endpoint leg has no raw
+    # demand sits on a leg that doesn't physically exist) from the FORCING set:
+    # such a link must not pull a real endpoint's leg totals toward a phantom-0
+    # side. It still appears in the conservation table and is flagged
+    # NCHRP-LINK-NOLEG downstream.
+    raw_present = {n: list(p) for n, p in present_t.items()}
+
     # Build link endpoint list with geographic ordering. Each EB/WB link
     # produces TWO directed entries (one EB, one WB); each NB/SB produces
     # one NB and one SB. Per-link method override possible via feasibility
@@ -348,6 +356,7 @@ def balance_leg_totals(
             continue
         a, b = int(L['fromNum']), int(L['toNum'])
         axis = L.get('direction')
+        pair = []
         if axis == 'EB/WB':
             a_lng = coords.get(a, {}).get('lng')
             b_lng = coords.get(b, {}).get('lng')
@@ -355,8 +364,8 @@ def balance_leg_totals(
                 west, east = (a, b) if a_lng < b_lng else (b, a)
             else:
                 west, east = (a, b) if a < b else (b, a)
-            link_directed.append((west, LEG_INDEX['E'], east, LEG_INDEX['W'], 'EB', L_idx))
-            link_directed.append((east, LEG_INDEX['W'], west, LEG_INDEX['E'], 'WB', L_idx))
+            pair = [(west, LEG_INDEX['E'], east, LEG_INDEX['W'], 'EB', L_idx),
+                    (east, LEG_INDEX['W'], west, LEG_INDEX['E'], 'WB', L_idx)]
         elif axis == 'NB/SB':
             a_lat = coords.get(a, {}).get('lat')
             b_lat = coords.get(b, {}).get('lat')
@@ -364,10 +373,23 @@ def balance_leg_totals(
                 south, north = (a, b) if a_lat < b_lat else (b, a)
             else:
                 south, north = (a, b) if a < b else (b, a)
-            link_directed.append((south, LEG_INDEX['N'], north, LEG_INDEX['S'], 'NB', L_idx))
-            link_directed.append((north, LEG_INDEX['S'], south, LEG_INDEX['N'], 'SB', L_idx))
+            pair = [(south, LEG_INDEX['N'], north, LEG_INDEX['S'], 'NB', L_idx),
+                    (north, LEG_INDEX['S'], south, LEG_INDEX['N'], 'SB', L_idx)]
+        if not pair:
+            continue
+
+        # TASK 2: drop a Full link whose endpoint leg has no raw demand (a leg that
+        # doesn't physically exist) from the forcing set — it must not pull a real
+        # endpoint's leg totals toward a phantom-0 side. pair[0] carries both
+        # endpoint legs (u0/u0_leg and d0/d0_leg).
+        u0, u0_leg, d0, d0_leg = pair[0][0], pair[0][1], pair[0][2], pair[0][3]
+        if (not raw_present.get(u0, [True] * 4)[u0_leg]) or \
+           (not raw_present.get(d0, [True] * 4)[d0_leg]):
+            continue
+
+        link_directed.extend(pair)
         # Mark linked legs as present even if raw was 0
-        for u, u_leg, d, d_leg, _dir, _idx in link_directed[-2:]:
+        for u, u_leg, d, d_leg, _dir, _idx in pair:
             present_t[u][u_leg] = True
             present_t[d][d_leg] = True
 
