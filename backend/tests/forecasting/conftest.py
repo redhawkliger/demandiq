@@ -9,7 +9,17 @@ Coordinates are anchored to a real San Diego lat/lng transformed into EPSG:2230,
 so the 4326→2230→4326 round-trip the adapter performs is exercised end to end.
 """
 
+import importlib.util
+
 import pytest
+
+# The synthetic SANDAG fixtures need the geo stack — pyproj for the 4326->2230
+# transform, geopandas/shapely to build the GeoDataFrame. Those deps live in
+# requirements-forecasting.txt, NOT the lean requirements.txt that CI installs,
+# so geo-fixture tests must SKIP (not error) when the stack is absent. This
+# mirrors the REAL_SHP skipif pattern used by the integration tests.
+_GEO_LIBS = ("pyproj", "geopandas", "shapely")
+_GEO_AVAILABLE = all(importlib.util.find_spec(m) is not None for m in _GEO_LIBS)
 
 # Project anchor — downtown San Diego. The near-cluster nodes are small foot
 # offsets from this point's EPSG:2230 projection.
@@ -19,6 +29,8 @@ ANCHOR_LNG, ANCHOR_LAT = -117.161, 32.715
 @pytest.fixture
 def anchor_2230():
     """Anchor lat/lng projected to EPSG:2230 (easting, northing) in feet."""
+    if not _GEO_AVAILABLE:
+        pytest.skip("geo stack (pyproj/geopandas/shapely) not installed")
     from pyproj import Transformer
     t = Transformer.from_crs(4326, 2230, always_xy=True)
     return t.transform(ANCHOR_LNG, ANCHOR_LAT)   # (easting, northing)
