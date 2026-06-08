@@ -1,6 +1,7 @@
 // frontend/src/lib/reviewMovements.test.mjs
 // Pure-ESM tests, no runner:  node frontend/src/lib/reviewMovements.test.mjs
 import { reconciliationVerdict, gapCaption } from './reviewMovements.js'
+import { changelog } from './reviewMovements.js'
 
 let passed = 0, failed = 0
 function ok(cond, msg) { if (cond) { passed++ } else { failed++; console.error('  FAIL:', msg) } }
@@ -49,6 +50,29 @@ ok(!reconciliationVerdict(run({ converged: true, residual: 30 }), 3, 'AM').label
 
 // ADR pin #2 — direct anchor on the exact caption wording
 eq(gapCaption(13), 'worst leg off its target by 13 veh', 'gapCaption exact wording (ADR pin #2)')
+
+// changelog tests
+const mr = { AM: [
+  { int_num: 3, movement: 'EBL', raw: 120, balanced: 145, delta: 25 },
+  { int_num: 3, movement: 'WBT', raw: 300, balanced: 288, delta: -12 },
+  { int_num: 3, movement: 'NBR', raw: 40,  balanced: 55,  delta: 15 },
+  { int_num: 3, movement: 'SBT', raw: 200, balanced: 200, delta: 0 },
+  { int_num: 3, movement: 'EBT', raw: 410, balanced: 410, delta: 0 },
+  { int_num: 5, movement: 'EBL', raw: 99,  balanced: 50,  delta: -49 }, // other int — excluded
+] }
+const cl = changelog({ movementsReview: mr }, 3, 'AM')
+ok(cl.totalCount === 5, `totalCount counts only int 3 rows (got ${cl.totalCount})`)
+ok(cl.adjustedCount === 3, `adjustedCount = delta!=0 rows (got ${cl.adjustedCount})`)
+eq(cl.changed.map(m => m.movement), ['EBL', 'NBR', 'WBT'],
+   'changed sorted by |delta| desc: 25, 15, 12')
+eq(cl.unchanged.map(m => m.movement), ['SBT', 'EBT'], 'unchanged = delta 0 rows, source order')
+ok(cl.headline === '3 of 5 adjusted', `headline (got "${cl.headline}")`)
+// zero-change case
+const cl0 = changelog({ movementsReview: { AM: [
+  { int_num: 7, movement: 'EBT', raw: 5, balanced: 5, delta: 0 },
+] } }, 7, 'AM')
+ok(cl0.adjustedCount === 0 && cl0.headline === 'No movements changed — raw counts already balanced',
+   'zero-change headline')
 
 console.log(`reviewMovements: ${passed} passed, ${failed} failed`)
 if (failed) process.exit(1)

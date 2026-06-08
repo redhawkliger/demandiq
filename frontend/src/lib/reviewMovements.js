@@ -22,3 +22,17 @@ export function reconciliationVerdict(lastRun, intNum, period) {
   if (gap === 0)  return { state: 'balanced', status: 'green', gap: 0, label: 'balanced' }
   return { state: 'gap', status: 'amber', gap, label: gapCaption(gap) }
 }
+
+// append to reviewMovements.js
+export function changelog(lastRun, intNum, period) {
+  const rows = (lastRun?.movementsReview?.[period] ?? []).filter(m => m.int_num === intNum)
+  const changed = rows.filter(m => m.delta !== 0)
+    .slice().sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta))
+  const unchanged = rows.filter(m => m.delta === 0)
+  const adjustedCount = changed.length
+  const totalCount = rows.length
+  const headline = adjustedCount === 0
+    ? 'No movements changed — raw counts already balanced'
+    : `${adjustedCount} of ${totalCount} adjusted`
+  return { changed, unchanged, adjustedCount, totalCount, headline }
+}
