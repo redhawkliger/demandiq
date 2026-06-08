@@ -115,6 +115,130 @@ def test_3leg_t_intersection():
     print(f"  test_3leg_t_intersection: PASS (W leg masked, converged in {iters} iter)")
 
 
+# ─── Test 3b — no phantom movement on an absent leg forced by a Full link ────
+def test_no_phantom_movement_on_absent_leg():
+    """Regression for the int-7 phantom-EBT bug. Int 7 is a 3-leg T on an E-W
+    corridor: legs W, N, S — there is NO E leg. So every E-leg movement is raw 0:
+    EBT/SBL/NBR (which exit east) and WBL/WBT/WBR (which approach from the east).
+    A Full EB/WB link 7->8 sits on the (absent) E side; the east neighbour pulls
+    demand through it. The Stage 4c.3 post-round reconciliation must NOT invent
+    eastbound-through flow on a leg that physically doesn't exist — raw EBT 0 must
+    stay balanced EBT 0 (likewise SBL, NBR, the other two E-exit movements).
+
+    Before the fix, reconciliation dumps the link's canonical volume into EBT
+    (first cell of DIRECTION_SPEC['EB']['outflow']) because it never checks raw-leg
+    presence, yielding a conservation-clean, unflagged phantom (~200+ veh)."""
+    int7 = mk({
+        'EBL': 80, 'EBR': 70,            # W-approach turns onto N/S (EBT=0: no E exit)
+        'NBT': 300, 'NBL': 60,           # S-approach: through N + left to W (NBR=0: no E)
+        'SBT': 290, 'SBR': 40,           # N-approach: through S + right to W (SBL=0: no E)
+    })
+    int8 = mk({                          # real east neighbour with EB approach demand
+        'EBL': 20, 'EBT': 400, 'EBR': 20, 'NBL': 50, 'NBT': 300, 'NBR': 40,
+        'SBL': 45, 'SBT': 290, 'SBR': 35, 'WBL': 40, 'WBT': 260, 'WBR': 30,
+    })
+    raw = {7: int7, 8: int8}
+    links = [{'fromNum': 7, 'toNum': 8, 'direction': 'EB/WB', 'mode': 'Full'}]
+    coords = {7: {'lat': 32.90, 'lng': -117.05}, 8: {'lat': 32.90, 'lng': -117.04}}  # 7 west of 8
+
+    res = balance_nchrp(raw, links, method='larger', coords=coords, round_to_5=True)
+    b7 = res['balanced'][7]
+    # All three movements exit via the absent E leg → none can carry flow.
+    assert b7['EBT'] == 0, f"phantom EBT={b7['EBT']} invented on an absent E leg"
+    assert b7['SBL'] == 0, f"phantom SBL={b7['SBL']} invented on an absent E leg"
+    assert b7['NBR'] == 0, f"phantom NBR={b7['NBR']} invented on an absent E leg"
+
+    # The infeasibility is SURFACED, not silently balanced: int 7's E-outflow
+    # stays 0, the link delta stays VISIBLE, and a NCHRP-LINK-NOLEG flag names it.
+    eb = next((c for c in res['link_conservation']
+               if c['fromNum'] == 7 and c['toNum'] == 8 and c['direction'] == 'EB'), None)
+    assert eb is not None, "expected link 7→8 EB in the conservation table"
+    assert eb['upstream_outflow'] == 0, f"int 7 E-outflow must be 0, got {eb['upstream_outflow']}"
+    assert abs(eb['delta']) > 0.5, f"infeasible link delta must stay visible, got {eb['delta']}"
+
+    # The FEASIBLE endpoint (int 8) must NOT be corrupted toward the phantom-0
+    # side: its real eastbound approach (raw 440) is preserved (~435 after IPF +
+    # round), never reconciled down toward int 7's structural 0.
+    b8 = res['balanced'][8]
+    assert b8['EBL'] + b8['EBT'] + b8['EBR'] >= 430, \
+        f"int 8 real W-approach corrupted to {b8['EBL'] + b8['EBT'] + b8['EBR']} (expected ~435)"
+
+    noleg = [f for f in res['qc_flags'] if f.get('check') == 'NCHRP-LINK-NOLEG' and f.get('int') == 7]
+    assert noleg, f"expected NCHRP-LINK-NOLEG for int 7; got {[f.get('check') for f in res['qc_flags']]}"
+    # Must NOT be mislabeled as a generic raw-floor delta on the same link.
+    generic = [f for f in res['qc_flags'] if f.get('check') == 'NCHRP-LINK-DELTA' and f.get('int') == 7]
+    assert not generic, f"no-leg link must not also raise NCHRP-LINK-DELTA: {generic}"
+    print("  test_no_phantom_movement_on_absent_leg: PASS "
+          "(no phantom; structural delta surfaced via NCHRP-LINK-NOLEG)")
+
+
+# ─── Test 3c — a no-leg link is purely informational, never forces ──────────
+def test_noleg_link_does_not_perturb_feasible_endpoint():
+    """TASK 2 (validate at resolve/leg-total time). A structurally infeasible
+    (no-leg) Full link must NOT force leg totals anywhere — not just in Stage 4c.3
+    reconciliation, but also in Level 1 (balance_leg_totals link-equality). It is
+    surfaced as NCHRP-LINK-NOLEG with a visible delta, but the balanced result of
+    its FEASIBLE endpoint must be byte-identical whether or not the broken link
+    exists. (Before TASK 2, Level 1's link-equality pulled int 8's real counts
+    toward int 7's phantom-0 side: EBT 400->395 plus five other movements.)"""
+    int7 = mk({'EBL': 80, 'EBR': 70, 'NBT': 300, 'NBL': 60, 'SBT': 290, 'SBR': 40})
+    int8 = mk({'EBL': 20, 'EBT': 400, 'EBR': 20, 'NBL': 50, 'NBT': 300, 'NBR': 40,
+               'SBL': 45, 'SBT': 290, 'SBR': 35, 'WBL': 40, 'WBT': 260, 'WBR': 30})
+    coords = {7: {'lat': 32.90, 'lng': -117.05}, 8: {'lat': 32.90, 'lng': -117.04}}
+    link = [{'fromNum': 7, 'toNum': 8, 'direction': 'EB/WB', 'mode': 'Full'}]
+
+    with_link = balance_nchrp({7: int7, 8: int8}, link, method='larger', coords=coords)['balanced'][8]
+    no_link = balance_nchrp({7: int7, 8: int8}, [], method='larger', coords=coords)['balanced'][8]
+    diff = [k for k in with_link if with_link[k] != no_link.get(k)]
+    assert not diff, f"no-leg link perturbed feasible int 8 on {diff}: " \
+        f"{ {k: (no_link[k], with_link[k]) for k in diff} }"
+    print("  test_noleg_link_does_not_perturb_feasible_endpoint: PASS "
+          "(feasible endpoint untouched by the broken link)")
+
+
+# ─── Test 3d — phantom-movement regression guardrail (detection only) ───────
+def test_phantom_movement_guardrail():
+    """TASK 3 (Option 4). A QC tripwire flags any balanced movement with a
+    positive value sitting on a leg with NO raw demand (a leg that doesn't
+    physically exist). Detection only — it never alters volumes. After the
+    TASK 1/2 fix this never fires in normal balancing; it exists so a FUTURE
+    regression that reintroduces a phantom is caught loudly, not silently
+    conserved."""
+    from balancer import detect_phantom_movements
+
+    # int 1: 3-leg T, no E leg — raw-present legs W, N, S (not E).
+    raw = {1: mk({'EBL': 80, 'EBR': 70, 'NBT': 300, 'NBL': 60, 'SBT': 290, 'SBR': 40})}
+
+    # A regression would put a phantom EBT (W-approach → absent E-exit) > 0.
+    phantom = {1: mk({'EBL': 80, 'EBR': 70, 'NBT': 300, 'NBL': 60,
+                      'SBT': 290, 'SBR': 40, 'EBT': 415})}
+    hit = [f for f in detect_phantom_movements(raw, phantom)
+           if f.get('check') == 'NCHRP-PHANTOM-MOVEMENT' and f.get('int') == 1]
+    assert hit, "guardrail must flag a phantom EBT on the absent E leg"
+    assert 'EBT' in hit[0]['message']
+
+    # A clean balanced result (nothing on the absent leg) raises nothing.
+    clean = {1: mk({'EBL': 80, 'EBR': 70, 'NBT': 300, 'NBL': 60, 'SBT': 290, 'SBR': 40})}
+    assert detect_phantom_movements(raw, clean) == [], "clean result must not be flagged"
+
+    # Legitimate movement on a PRESENT leg (raw 0 but leg has demand) is NOT a
+    # phantom — e.g. EBL raw 0 but the W leg exists (EBR>0) and N leg exists.
+    legit = {1: mk({'EBL': 5, 'EBR': 70, 'NBT': 300, 'NBL': 60, 'SBT': 290, 'SBR': 40})}
+    assert detect_phantom_movements(raw, legit) == [], "raw-0 fill on a present leg is legitimate, not phantom"
+
+    # Wired into the pipeline AND silent when the fix works: the int-7 scenario
+    # must produce NO phantom flag (the fix prevents the phantom).
+    int7 = mk({'EBL': 80, 'EBR': 70, 'NBT': 300, 'NBL': 60, 'SBT': 290, 'SBR': 40})
+    int8 = mk({'EBL': 20, 'EBT': 400, 'EBR': 20, 'NBL': 50, 'NBT': 300, 'NBR': 40,
+               'SBL': 45, 'SBT': 290, 'SBR': 35, 'WBL': 40, 'WBT': 260, 'WBR': 30})
+    res = balance_nchrp({7: int7, 8: int8},
+                        [{'fromNum': 7, 'toNum': 8, 'direction': 'EB/WB', 'mode': 'Full'}],
+                        method='larger', coords={7: {'lat': 32.9, 'lng': -117.05}, 8: {'lat': 32.9, 'lng': -117.04}})
+    assert not [f for f in res['qc_flags'] if f.get('check') == 'NCHRP-PHANTOM-MOVEMENT'], \
+        "guardrail must be silent when the fix works (no phantom produced)"
+    print("  test_phantom_movement_guardrail: PASS (fires on phantom, silent when clean/legit/fixed)")
+
+
 # ─── Test 4a — under 'larger', every balanced movement stays >= raw ─────────
 def test_larger_conserves_links_movements_may_drop():
     """Under 'larger', the guarantee that actually holds is LINK CONSERVATION,
@@ -845,6 +969,9 @@ if __name__ == '__main__':
         test_furness_4x4_known_answer,
         test_link_resolution_larger_vs_average,
         test_3leg_t_intersection,
+        test_no_phantom_movement_on_absent_leg,
+        test_noleg_link_does_not_perturb_feasible_endpoint,
+        test_phantom_movement_guardrail,
         test_larger_conserves_links_movements_may_drop,
         test_average_can_go_below_raw,
         test_end_to_end_3int_corridor,
