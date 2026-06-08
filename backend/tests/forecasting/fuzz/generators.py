@@ -40,6 +40,41 @@ def ew_corridor(draw):
     return nums, coords, links, volumes
 
 
+# Movement -> (approach-leg, exit-leg) indices (S=0, N=1, W=2, E=3). Mirrors
+# balancer.CELL_MOVEMENT. A movement can only carry flow when BOTH its legs exist.
+MV_LEGS = {
+    "NBL": (0, 2), "NBT": (0, 1), "NBR": (0, 3),
+    "SBT": (1, 0), "SBR": (1, 2), "SBL": (1, 3),
+    "EBR": (2, 0), "EBL": (2, 1), "EBT": (2, 3),
+    "WBL": (3, 0), "WBR": (3, 1), "WBT": (3, 2),
+}
+
+
+# ── 1b. Corridor with random STUB legs — exercises the absent-leg invariant ────
+@st.composite
+def stub_leg_corridor(draw):
+    """Like ew_corridor, but each intersection independently keeps only 2-4 of its
+    four legs (a T- or stub-intersection). Movements touching an absent leg are
+    forced to 0, exactly as a real count sheet records them. Consecutive
+    intersections are still linked EB/WB (Full), so some links land on an absent
+    E/W leg — the phantom-movement trigger (the int-7 EBT bug). The balancer must
+    never assign flow to an absent leg. Returns (nums, coords, links, volumes)."""
+    k = draw(st.integers(min_value=2, max_value=5))
+    nums = draw(st.lists(st.integers(min_value=1, max_value=99),
+                         min_size=k, max_size=k, unique=True))
+    nums = draw(st.permutations(nums))
+    coords = {n: {"lat": 32.72, "lng": -117.20 + 0.01 * i} for i, n in enumerate(nums)}
+    links = [{"fromNum": nums[i], "toNum": nums[i + 1], "direction": "EB/WB", "mode": "Full"}
+             for i in range(k - 1)]
+    volumes = {}
+    for n in nums:
+        legs = set(draw(st.lists(st.sampled_from([0, 1, 2, 3]),
+                                 min_size=2, max_size=4, unique=True)))
+        volumes[n] = {mv: (float(draw(_count)) if (r in legs and c in legs) else 0.0)
+                      for mv, (r, c) in MV_LEGS.items()}
+    return nums, coords, links, volumes
+
+
 # ── 2. Single 4-leg intersection for the refine -> pass1 spine ─────────────────
 _CENTER_LNG, _CENTER_LAT = -117.160, 32.720
 _C_XY = (_CENTER_LNG, _CENTER_LAT)

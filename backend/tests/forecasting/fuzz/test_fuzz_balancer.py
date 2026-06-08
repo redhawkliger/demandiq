@@ -4,7 +4,7 @@ import math
 
 from hypothesis import given
 
-from balancer import furness_intersection
+from balancer import furness_intersection, balance_nchrp
 from forecasting.pass2 import balance_future
 from tests.forecasting.fuzz import generators as g
 
@@ -60,3 +60,27 @@ def test_balance_future_corridor_invariants(corridor):
     got_pairs = {frozenset([c["fromNum"], c["toNum"]]) for c in res["link_conservation"]}
     want_pairs = {frozenset([l["fromNum"], l["toNum"]]) for l in links}
     assert got_pairs == want_pairs
+
+
+# Invariant — NO MOVEMENT ON AN ABSENT LEG (the int-7 phantom-EBT class). The
+# balancer must never assign positive flow to a movement whose approach or exit
+# leg has no raw demand (the leg doesn't physically exist) — even when a Full
+# corridor link lands on a stub intersection's absent E/W leg. Leg presence is
+# re-derived INDEPENDENTLY here from the generated counts (a leg exists iff some
+# movement touching it has raw demand), so this checks the balancer's output, not
+# its own guardrail.
+@given(g.stub_leg_corridor())
+def test_no_movement_on_absent_leg(case):
+    nums, coords, links, volumes = case
+    res = balance_nchrp(volumes, links, method="larger", coords=coords, round_to_5=True)
+    for n, bvols in res["balanced"].items():
+        present = [False, False, False, False]
+        for mv, (r, c) in g.MV_LEGS.items():
+            if volumes[n].get(mv, 0) > 0:
+                present[r] = True
+                present[c] = True
+        for mv, (r, c) in g.MV_LEGS.items():
+            if bvols.get(mv, 0) > 0:
+                assert present[r] and present[c], (
+                    f"int {n}: balanced {mv}={bvols[mv]} on absent leg "
+                    f"(legs present S/N/W/E={present}, raw {mv}={volumes[n].get(mv, 0)})")
