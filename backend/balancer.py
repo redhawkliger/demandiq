@@ -621,6 +621,43 @@ def _raw_leg_present(int_vols):
     return pres
 
 
+def detect_phantom_movements(raw_volumes, balanced):
+    """REGRESSION GUARDRAIL (detection only — never alters volumes).
+
+    Flags any balanced movement with a POSITIVE value sitting on a leg with no raw
+    demand. A movement occupies cell (approach-leg row, exit-leg col); it is a
+    phantom when EITHER its approach leg or its exit leg has zero raw demand — i.e.
+    the leg doesn't physically exist, yet flow was assigned to it. After the
+    absent-leg fix (Stage 4c.3 cell gating + no-leg link exclusion) this should
+    never fire in normal balancing; it's a tripwire so a future change that
+    reintroduces a phantom is caught loudly instead of silently conserving it.
+
+    A raw-0 movement on a leg that DOES have demand is legitimate NCHRP behavior
+    (Furness/reconciliation may assign it) and is NOT flagged. U-turns pass through
+    (not matrix-assigned) and are not checked.
+
+    Returns a list of NCHRP-PHANTOM-MOVEMENT qc_flag dicts (possibly empty)."""
+    leg_name = {v: k for k, v in LEG_INDEX.items()}
+    flags = []
+    for int_num, bvols in balanced.items():
+        rp = _raw_leg_present(raw_volumes.get(int_num, {}))
+        for mv, (r, c) in MOVEMENT_CELL.items():
+            if bvols.get(mv, 0) <= 0 or (rp[r] and rp[c]):
+                continue
+            absent = '/'.join(leg_name[i] for i in (r, c) if not rp[i])
+            flags.append({
+                'check': 'NCHRP-PHANTOM-MOVEMENT',
+                'int': int_num,
+                'message': (
+                    f"Int {int_num}: balanced {mv}={bvols[mv]} on absent leg(s) "
+                    f"{absent} (no raw demand). A movement was assigned to a leg "
+                    f"that doesn't physically exist — a balancing bug that should "
+                    f"never occur post-fix; investigate."
+                ),
+            })
+    return flags
+
+
 def _adjust_leg_to_target(balanced_int, ltr_keys, raw_int, target, shared_keys=None,
                           leg_present=None):
     """Stage 4c.3 helper. Round each of the 3 L/T/R cells up to nearest 5
@@ -1365,6 +1402,10 @@ def balance_nchrp(
                     f"intentionally not reconciled on this link)." + root
                 ),
             })
+
+    # Regression tripwire (detection only): catch any movement assigned to a leg
+    # with no raw demand. Silent post-fix; loud if a future change regresses.
+    qc_flags.extend(detect_phantom_movements(raw_volumes, balanced))
 
     movements_review = compute_movements_review(raw_volumes, balanced)
 
