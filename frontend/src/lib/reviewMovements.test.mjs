@@ -1,6 +1,6 @@
 // frontend/src/lib/reviewMovements.test.mjs
 // Pure-ESM tests, no runner:  node frontend/src/lib/reviewMovements.test.mjs
-import { reconciliationVerdict } from './reviewMovements.js'
+import { reconciliationVerdict, gapCaption } from './reviewMovements.js'
 
 let passed = 0, failed = 0
 function ok(cond, msg) { if (cond) { passed++ } else { failed++; console.error('  FAIL:', msg) } }
@@ -46,6 +46,9 @@ eq(reconciliationVerdict(run({ converged: true, residual: 0.4 }), 3, 'AM').state
 // PROPERTY: caption never contains the forbidden word "unaccounted" (ADR pin #2)
 ok(!reconciliationVerdict(run({ converged: true, residual: 30 }), 3, 'AM').label.includes('unaccounted'),
    'gap caption never says "unaccounted"')
+
+// ADR pin #2 — direct anchor on the exact caption wording
+eq(gapCaption(13), 'worst leg off its target by 13 veh', 'gapCaption exact wording (ADR pin #2)')
 
 console.log(`reviewMovements: ${passed} passed, ${failed} failed`)
 if (failed) process.exit(1)

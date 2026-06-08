@@ -10,6 +10,7 @@
 
 // ADR 0001 pin #2 — exact caption. The intersection total always reconciles,
 // so the gap is the worst leg vs its TARGET, never "unaccounted".
+// Precondition: gap > 0 (callers handle gap === 0 via the "balanced" branch).
 export function gapCaption(gap) {
   return `worst leg off its target by ${gap} veh`
 }
