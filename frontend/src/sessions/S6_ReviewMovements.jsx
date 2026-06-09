@@ -54,7 +54,7 @@ export default function S6_ReviewMovements() {
           <ChangelogCard lastRun={lastRun} intNum={intNum} period={period} />
           <ReconciliationCard lastRun={lastRun} intNum={intNum} period={period} />
           <FlagIndicator lastRun={lastRun} intNum={intNum} period={period}
-                         onGoToVerdict={() => navigate('/s6')} />
+                         onGoToVerdict={() => navigate('/analysis')} />
         </div>
       </div>
 

@@ -448,6 +448,14 @@ export default function S6_RunAnalysis() {
               type="button"
               className="di-btn-secondary"
               disabled={!hasResults || isRunning}
+              onClick={() => navigate('/review-movements')}
+            >
+              Review movements →
+            </button>
+            <button
+              type="button"
+              className="di-btn-secondary"
+              disabled={!hasResults || isRunning}
               onClick={() => navigate('/results')}
             >
               Skip to results →
