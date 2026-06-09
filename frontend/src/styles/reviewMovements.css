@@ -6,6 +6,9 @@
 .di-rm__body { display: grid; grid-template-columns: 1fr 320px; gap: 16px; padding: 20px; }
 .di-rm__anchor { background: var(--surface, var(--bg-elevated)); border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
 .di-rm__rail { display: flex; flex-direction: column; gap: 12px; }
+.di-rm-rail-strip { display: flex; gap: 6px; overflow-x: auto; padding: 8px 20px; border-top: 1px solid var(--border); background: var(--bg-elevated); }
+.di-rm-rail-strip button { background: none; border: 1px solid var(--border); border-radius: 6px; color: var(--text-secondary); font-size: 11px; min-width: 28px; padding: 4px 6px; cursor: pointer; }
+.di-rm-rail-strip button[aria-selected="true"] { border-color: var(--accent, #60A5FA); color: var(--text-primary); }
 
 .di-rm-card { background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 10px; padding: 14px; }
 .di-rm-card__label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-tertiary); margin-bottom: 8px; }
@@ -27,4 +30,3 @@
 .di-rm-prov { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 14px 20px; border-bottom: 1px solid var(--border); background: var(--bg-elevated); }
 .di-rm-prov__method { font-size: 12px; color: var(--text-secondary); }
 .di-rm-prov__method b { color: var(--text-primary); }
-.di-rm-chip { border: 1px solid var(--accent, #60A5FA); color: var(--text-secondary); border-radius: 8px; padding: 3px 8px; font-size: 11px; }
