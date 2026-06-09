@@ -35,6 +35,12 @@
   --signal-amber-hover: #FFC526;
   --signal-amber-glow:  rgba(244, 180, 0, 0.10);
   --signal-green-glow:  rgba(34, 197, 94, 0.10);
+  /* Delta colors — DIRECTION (a movement went up/down), NOT status.
+     Deliberately distinct from --signal-* so "a number changed" never
+     reads as "pass/fail". Values are the line-diagram renderer constants
+     (backend/line_diagram.py DG_DELTA_UP / DG_DELTA_DOWN). */
+  --delta-up:   #2D8050;
+  --delta-down: #B0413E;
 }
 
 :root,
@@ -53,6 +59,8 @@
   --border:         rgba(255, 255, 255, 0.07);
   --border-strong:  rgba(255, 255, 255, 0.15);
   color-scheme: dark;
+  --delta-up:   #2D8050;
+  --delta-down: #B0413E;
 }
 
 :root[data-theme="sunshine"] {
@@ -70,4 +78,6 @@
   --border:         #E7E5E4;
   --border-strong:  #D6D3D1;
   color-scheme: light;
+  --delta-up:   #2D8050;
+  --delta-down: #B0413E;
 }
