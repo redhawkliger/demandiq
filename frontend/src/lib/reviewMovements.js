@@ -44,3 +44,27 @@ export function methodLabel(lastRun) {
   const key = (lastRun?.method ?? lastRun?.config?.linkResolution ?? 'larger')
   return METHOD_COPY[key] ?? METHOD_COPY.larger
 }
+
+// ADR 0001 pin #1 — the tolerance that actually governs intConverged is the
+// per-intersection IPF Level-2 tol, hardcoded in backend/balancer.py:1161.
+// It is NOT config.convergenceThreshold (a different Level-1 value). The
+// Details modal is a defend-the-work surface, so it must show the real number.
+export const IPF_TOLERANCE_VEH = 0.01
+
+export function detailsModalData(lastRun, intNum, period) {
+  const flags = (lastRun?.qcFlags ?? []).filter(
+    f => f.int === intNum && (f.period == null || f.period === period),
+  )
+  const resolvedLinks = (lastRun?.resolvedLinks?.[period] ?? []).filter(
+    l => l.fromNum === intNum || l.toNum === intNum,
+  )
+  return {
+    iterations: lastRun?.iterations?.[period]?.[intNum],
+    finalResidual: lastRun?.finalResidual?.[period]?.[intNum],
+    converged: lastRun?.intConverged?.[period]?.[intNum] === true,
+    toleranceVeh: IPF_TOLERANCE_VEH,
+    maxIterations: lastRun?.config?.maxIterations,
+    flags,
+    resolvedLinks,
+  }
+}
