@@ -2,6 +2,7 @@
 // Pure-ESM tests, no runner:  node frontend/src/lib/reviewMovements.test.mjs
 import { reconciliationVerdict, gapCaption } from './reviewMovements.js'
 import { changelog } from './reviewMovements.js'
+import { methodLabel } from './reviewMovements.js'
 
 let passed = 0, failed = 0
 function ok(cond, msg) { if (cond) { passed++ } else { failed++; console.error('  FAIL:', msg) } }
@@ -73,6 +74,16 @@ const cl0 = changelog({ movementsReview: { AM: [
 ] } }, 7, 'AM')
 ok(cl0.adjustedCount === 0 && cl0.headline === 'No movements changed — raw counts already balanced',
    'zero-change headline')
+
+eq(methodLabel({ method: 'larger' }),
+   { label: 'Larger', meaning: 'each shared link takes the larger of its two raw counts' },
+   'larger label+meaning')
+eq(methodLabel({ method: 'average' }),
+   { label: 'Average', meaning: 'each shared link takes the mean of its two raw counts' },
+   'average label+meaning')
+// falls back to config.linkResolution when top-level method missing
+ok(methodLabel({ config: { linkResolution: 'average' } }).label === 'Average',
+   'falls back to config.linkResolution')
 
 console.log(`reviewMovements: ${passed} passed, ${failed} failed`)
 if (failed) process.exit(1)

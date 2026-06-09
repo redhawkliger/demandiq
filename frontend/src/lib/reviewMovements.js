@@ -23,7 +23,6 @@ export function reconciliationVerdict(lastRun, intNum, period) {
   return { state: 'gap', status: 'amber', gap, label: gapCaption(gap) }
 }
 
-// append to reviewMovements.js
 export function changelog(lastRun, intNum, period) {
   const rows = (lastRun?.movementsReview?.[period] ?? []).filter(m => m.int_num === intNum)
   const changed = rows.filter(m => m.delta !== 0)
@@ -35,4 +34,13 @@ export function changelog(lastRun, intNum, period) {
     ? 'No movements changed — raw counts already balanced'
     : `${adjustedCount} of ${totalCount} adjusted`
   return { changed, unchanged, adjustedCount, totalCount, headline }
+}
+
+const METHOD_COPY = {
+  larger:  { label: 'Larger',  meaning: 'each shared link takes the larger of its two raw counts' },
+  average: { label: 'Average', meaning: 'each shared link takes the mean of its two raw counts' },
+}
+export function methodLabel(lastRun) {
+  const key = (lastRun?.method ?? lastRun?.config?.linkResolution ?? 'larger')
+  return METHOD_COPY[key] ?? METHOD_COPY.larger
 }
