@@ -4,6 +4,7 @@ import { reconciliationVerdict, gapCaption } from './reviewMovements.js'
 import { changelog } from './reviewMovements.js'
 import { methodLabel } from './reviewMovements.js'
 import { detailsModalData, IPF_TOLERANCE_VEH } from './reviewMovements.js'
+import { stepIndex, statusClass, deltaClass } from './reviewMovements.js'
 
 let passed = 0, failed = 0
 function ok(cond, msg) { if (cond) { passed++ } else { failed++; console.error('  FAIL:', msg) } }
@@ -114,6 +115,27 @@ eq(d.flags.map(f => f.check), ['SOURCE-OUTLIER', 'GEOMETRY-FALLBACK'],
    'flags: this int (incl period:null), excludes corridor-level int:0')
 eq(d.resolvedLinks.map(l => `${l.fromNum}->${l.toNum}`), ['2->3', '3->4'],
    'resolvedLinks touching int 3 only')
+
+// nav clamps at both ends, operates on given array order (corridor invariant)
+ok(stepIndex(8, 2, +1) === 3, 'next')
+ok(stepIndex(8, 2, -1) === 1, 'prev')
+ok(stepIndex(8, 0, -1) === 0, 'clamp at start')
+ok(stepIndex(8, 7, +1) === 7, 'clamp at end')
+
+// THEME RULE (ADR/locked): status = traffic-light (good/attention/bad);
+// delta = direction (up/down), a SEPARATE system. The two class namespaces
+// must be DISJOINT so a green/up delta can never read as "pass".
+ok(statusClass('green') === 'di-rm-status--green', 'status green class')
+ok(statusClass('amber') === 'di-rm-status--amber', 'status amber class')
+ok(statusClass('red') === 'di-rm-status--red', 'status red class')
+ok(deltaClass(25) === 'di-rm-delta--up', 'positive delta → up class')
+ok(deltaClass(-12) === 'di-rm-delta--down', 'negative delta → down class')
+const statusClasses = ['green', 'amber', 'red'].map(statusClass)
+const deltaClasses = [25, -12].map(deltaClass)
+ok(statusClasses.every(c => c.startsWith('di-rm-status--')), 'all status classes in status namespace')
+ok(deltaClasses.every(c => c.startsWith('di-rm-delta--')), 'all delta classes in delta namespace')
+ok(statusClasses.filter(c => deltaClasses.includes(c)).length === 0,
+   'status and delta class namespaces are DISJOINT (two color systems never collide)')
 
 console.log(`reviewMovements: ${passed} passed, ${failed} failed`)
 if (failed) process.exit(1)

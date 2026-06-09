@@ -68,3 +68,16 @@ export function detailsModalData(lastRun, intNum, period) {
     resolvedLinks,
   }
 }
+
+// Corridor navigation. `count` is the length of the intersections array in its
+// GIVEN order (= corridor order). NEVER sort by int number — see memory
+// corridor-order-invariant. Callers pass the array index, not the int num.
+export function stepIndex(count, currentIndex, dir) {
+  return Math.max(0, Math.min(count - 1, currentIndex + dir))
+}
+
+// Two distinct color systems, enforced as disjoint class namespaces:
+//  - STATUS  → traffic-light signal palette (good/attention/bad)
+//  - DELTA   → direction (a number went up vs down); NOT good vs bad
+export function statusClass(status) { return `di-rm-status--${status}` }
+export function deltaClass(delta)  { return `di-rm-delta--${delta >= 0 ? 'up' : 'down'}` }
