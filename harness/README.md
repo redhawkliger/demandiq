@@ -23,6 +23,15 @@ Optional: `ANTHROPIC_API_KEY` enables LLM failure narration (post-verdict
 only). Without it, failures get a deterministic fallback narration — the
 verdict pipeline is identical either way.
 
+Optional: `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` enable Telegram
+notifications (`notify.py`) — exactly four message types: a checkpoint every
+50 runs, first-occurrence-only new failure signatures, loop death (the loop
+itself crashed, distinct from `pipeline-crash` which it survives), and a
+morning summary with trend vs the previous session (sent at loop stop or
+7:00 AM, whichever first). With the env vars unset the notifier is a silent
+no-op; a notify error is logged to `harness_errors.log` and never raised —
+notification reads results, never influences them.
+
 ## Where results land
 
 | Path | What |
@@ -84,5 +93,5 @@ fail-then-pass suite offline (no backend needed).
 
 No Mechanic/auto-fix (Phase 2). No UI driving. No golden cases yet
 (`goldens/` hook is ready). No ±30% tier, T-intersections, missing
-legs/movements, AM+PM dual-period consistency checks, forecasting coverage,
-or Telegram.
+legs/movements, AM+PM dual-period consistency checks, or forecasting
+coverage.

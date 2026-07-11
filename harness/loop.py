@@ -17,6 +17,7 @@ import traceback
 from datetime import datetime, timezone
 
 from . import operate
+from .notify import SessionNotifier
 from .runner import execute_run, print_row
 from .scorekeeper import HARNESS_ROOT
 
@@ -33,6 +34,10 @@ def main(argv=None):
                    help='seconds between runs (default 0)')
     args = p.parse_args(argv)
 
+    # Observation only: the notifier reads results rows, never influences
+    # them, and is a silent no-op without Telegram env vars.
+    notifier = SessionNotifier()
+
     seed = args.start_seed
     done = 0
     try:
@@ -40,6 +45,7 @@ def main(argv=None):
             try:
                 row = execute_run(seed, base_url=args.base_url)
                 print_row(row)
+                notifier.on_run(row)
             except KeyboardInterrupt:
                 raise
             except Exception:
@@ -57,6 +63,15 @@ def main(argv=None):
                 time.sleep(args.sleep)
     except KeyboardInterrupt:
         print(f'\nstopped at seed {seed} after {done} run(s)', file=sys.stderr)
+    except BaseException as e:
+        # The loop ITSELF is dying — per-seed failures are absorbed above, so
+        # anything landing here means the loop cannot continue. Distinct
+        # message type from pipeline-crash (which the loop survives silently).
+        notifier.on_loop_death(f'{type(e).__name__}: {e}\n'
+                               f'{traceback.format_exc()[-500:]}')
+        raise
+    finally:
+        notifier.on_stop()
     return 0
 
 
