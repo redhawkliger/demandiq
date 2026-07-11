@@ -3,6 +3,7 @@ results.csv
 summary.md
 harness_errors.log
 checkpoints.log
+last_session.json
 runs/
 failures/
 __pycache__/
