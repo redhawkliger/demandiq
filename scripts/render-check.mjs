@@ -20,16 +20,23 @@
 //      lint half of verify-frontend.sh, not here.
 //
 // Usage:
-//   node scripts/render-check.mjs [--route /path] [--root <sel>]
-//                                 [--image <sel>] [--origin http://localhost:3000]
+//   node scripts/render-check.mjs [--route /path] [--root <sel>] [--image <sel>]
+//                                 [--seed <file.json>] [--click "<button text>"]
+//                                 [--origin http://localhost:3000]
 //                                 [--backend http://localhost:8000]
 // Defaults target the S6 "Review Movements" view (the anchor-diagram render
-// that blanked). Requires the Vite dev server and backend to be running.
+// that blanked). --seed replaces the built-in project with a JSON file (needed
+// for routes gated on extra store slices, e.g. F4's forecasting.results).
+// --click reveals a diagram behind an interaction (e.g. S8's "Preview AM + PM")
+// before the render assertion. Requires the Vite dev server and backend running.
 
 import { spawn } from 'node:child_process'
-import { mkdtempSync, writeFileSync, rmSync, existsSync } from 'node:fs'
+import { mkdtempSync, writeFileSync, rmSync, existsSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, isAbsolute, dirname } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 
 // ---- args ----
 const argv = process.argv.slice(2)
@@ -43,6 +50,22 @@ const IMAGE_SEL = arg('--image', '.di-rm__anchor img')
 const ORIGIN = arg('--origin', 'http://localhost:3000')
 const BACKEND = arg('--backend', 'http://localhost:8000')
 const PORT = Number(arg('--port', '9245'))
+// Optional: a JSON seed file (replaces the built-in default seed) and a button
+// to click before asserting the render (for views whose diagram is behind an
+// interaction, e.g. S8's "Preview AM + PM"). Relative --seed paths resolve
+// against CWD first, then the repo root, so `--seed scripts/fixtures/x.json`
+// works from anywhere.
+const SEED_ARG = arg('--seed', null)
+const CLICK_TEXT = arg('--click', null)
+
+function resolveSeedPath(p) {
+  if (isAbsolute(p)) return existsSync(p) ? p : null
+  const fromCwd = join(process.cwd(), p)
+  if (existsSync(fromCwd)) return fromCwd
+  const fromRepo = join(REPO_ROOT, p)
+  if (existsSync(fromRepo)) return fromRepo
+  return null
+}
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 const fail = (msg) => { console.error(`render-check: FAIL — ${msg}`); process.exitCode = 1 }
@@ -154,6 +177,15 @@ async function evaluate(send, expression) {
 }
 
 async function main() {
+  // Resolve the seed first: built-in default, or a JSON file via --seed.
+  let seed = buildSeed()
+  if (SEED_ARG) {
+    const p = resolveSeedPath(SEED_ARG)
+    if (!p) { fail(`--seed file not found: ${SEED_ARG} (looked in CWD and ${REPO_ROOT})`); return }
+    try { seed = JSON.parse(readFileSync(p, 'utf8')) }
+    catch (e) { fail(`--seed file is not valid JSON (${p}): ${e.message}`); return }
+  }
+
   const chrome = findChrome()
   if (!chrome) { fail('no Chrome/Chromium binary found (set CHROME_PATH)'); return }
 
@@ -197,8 +229,26 @@ async function main() {
     // Seed at the origin, then navigate to the route so the store hydrates from localStorage.
     await send('Page.navigate', { url: `${ORIGIN}/` })
     await sleep(1500)
-    await evaluate(send, `localStorage.setItem('demandiq:project', ${JSON.stringify(JSON.stringify(buildSeed()))})`)
+    await evaluate(send, `localStorage.setItem('demandiq:project', ${JSON.stringify(JSON.stringify(seed))})`)
     await send('Page.navigate', { url: `${ORIGIN}${ROUTE}` })
+
+    // Optional pre-step: click a button (matched by visible text) to reveal a
+    // diagram that only renders after an interaction, e.g. S8's "Preview AM + PM".
+    if (CLICK_TEXT) {
+      let clicked = false
+      const clickDeadline = Date.now() + 6000
+      while (Date.now() < clickDeadline) {
+        clicked = await evaluate(send, `(() => {
+          const b = [...document.querySelectorAll('button')].find((x) => x.textContent.includes(${JSON.stringify(CLICK_TEXT)}))
+          if (b) { b.click(); return true }
+          return false
+        })()`)
+        if (clicked) break
+        await sleep(300)
+      }
+      if (!clicked) { fail(`--click button not found: "${CLICK_TEXT}" at ${ROUTE}`); cleanup(); return }
+      await sleep(1500) // let the click's fetch kick off before polling
+    }
 
     // Poll for the render: root present AND the required image has real pixels.
     const check = `(() => {

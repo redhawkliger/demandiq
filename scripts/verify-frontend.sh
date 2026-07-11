@@ -29,13 +29,21 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 FRONTEND_DIR="$REPO_ROOT/frontend"
 
 RENDER=0
+RENDER_ARGS=()   # everything after/around --render is forwarded to render-check.mjs
+                 # (e.g. --route/--root/--image/--seed/--click) so per-route overrides
+                 # work through the one-line gate, not just the default route.
 for a in "$@"; do
   case "$a" in
     --render) RENDER=1 ;;
-    -h|--help) sed -n '2,20p' "$0"; exit 0 ;;
-    *) echo "verify-frontend: unknown argument '$a'" >&2; exit 2 ;;
+    -h|--help) sed -n '2,24p' "$0"; exit 0 ;;
+    *) RENDER_ARGS+=("$a") ;;
   esac
 done
+
+if [ "$RENDER" -eq 0 ] && [ "${#RENDER_ARGS[@]}" -gt 0 ]; then
+  echo "verify-frontend: render overrides (${RENDER_ARGS[*]}) require --render" >&2
+  exit 2
+fi
 
 # ---- Gate 1: lint (always) — the exact command CI runs (frontend/ npm run lint = eslint .) ----
 echo "verify-frontend: running lint (npm run lint) ..."
@@ -50,7 +58,13 @@ echo "verify-frontend: lint PASS"
 # ---- Gate 2: render (on --render) — proves the app actually renders, not just builds ----
 if [ "$RENDER" -eq 1 ]; then
   echo "verify-frontend: running render check (headless Chrome) ..."
-  node "$REPO_ROOT/scripts/render-check.mjs"
+  # Guard the array expansion: bash 3.2 (macOS default) + `set -u` errors on
+  # "${arr[@]}" when the array is empty, so only expand it when populated.
+  if [ "${#RENDER_ARGS[@]}" -gt 0 ]; then
+    node "$REPO_ROOT/scripts/render-check.mjs" "${RENDER_ARGS[@]}"
+  else
+    node "$REPO_ROOT/scripts/render-check.mjs"
+  fi
   render_status=$?
   if [ "$render_status" -ne 0 ]; then
     echo "verify-frontend: RENDER FAILED (exit $render_status)" >&2
