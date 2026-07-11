@@ -26,11 +26,12 @@ export default function IntersectionDiagram({ intersection, period }) {
   useEffect(() => {
     let live = true
     if (!intersection) return
-    setErr(null); setPng(null)
+    // State is only set inside the async callbacks (matches S7 convention) so the
+    // effect body triggers no synchronous setState. endpoint returns { png_base64 }
+    // (see backend app.py); S7/F4/S8 read the same key.
     fetchDiagram(buildPayload(intersection, period, mode))
-      // endpoint returns { png_base64 } (see backend app.py); S7/F4/S8 read the same key.
-      .then(d => { if (live) setPng(d.png_base64) })
-      .catch(e => { if (live) setErr(e.message) })
+      .then(d => { if (live) { setErr(null); setPng(d.png_base64) } })
+      .catch(e => { if (live) { setPng(null); setErr(e.message) } })
     return () => { live = false }
   }, [intersection, period, mode])
 
