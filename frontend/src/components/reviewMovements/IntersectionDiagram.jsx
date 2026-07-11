@@ -28,7 +28,8 @@ export default function IntersectionDiagram({ intersection, period }) {
     if (!intersection) return
     setErr(null); setPng(null)
     fetchDiagram(buildPayload(intersection, period, mode))
-      .then(d => { if (live) setPng(d.png) })
+      // endpoint returns { png_base64 } (see backend app.py); S7/F4/S8 read the same key.
+      .then(d => { if (live) setPng(d.png_base64) })
       .catch(e => { if (live) setErr(e.message) })
     return () => { live = false }
   }, [intersection, period, mode])
