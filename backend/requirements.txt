@@ -3,6 +3,7 @@ uvicorn[standard]==0.32.1
 python-multipart==0.0.17
 jinja2==3.1.4
 anthropic==0.39.0
+httpx==0.27.2  # pin: anthropic 0.39.0 passes proxies= to httpx.Client, removed in httpx 0.28
 openpyxl==3.1.5
 pdfplumber==0.11.4
 pdf2image==1.17.0
