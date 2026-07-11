@@ -60,3 +60,17 @@ jobs:
         # the geo stack, which CI does not install. The numeric pipeline and the
         # fuzz bot are pure Python and run here as a blocking gate.
         run: python -m pytest tests/forecasting/ -q
+
+  harness:
+    name: Examiner harness — schema drift + detector suite
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install pytest
+      - name: Schema drift check (frontend source vs frozen puzzle schema)
+        run: python harness/schema/check_drift.py
+      - name: Detector fail-then-pass suite (offline, no backend)
+        run: python -m pytest harness/tests -q
