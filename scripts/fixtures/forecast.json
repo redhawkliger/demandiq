@@ -1,0 +1,77 @@
+{
+  "_comment": "Synthetic project seed for render-check --seed. Adds a forecasting.results slice so F4 (/forecast/results) renders its existing+forecast diagrams instead of the 'Run the forecast first' empty state. Not real data — shape only.",
+  "project": { "name": "forecast fixture (synthetic)" },
+  "intersections": [
+    {
+      "id": "i1", "num": 1, "name": "Main St & 1st Ave", "lat": 32.714, "lng": -117.16,
+      "control": "Signalized", "mainDir": "EB/WB",
+      "approaches": {
+        "EB": { "exists": true, "lanes": [{ "movement": "T" }], "stopControlled": false },
+        "WB": { "exists": true, "lanes": [{ "movement": "T" }], "stopControlled": false },
+        "NB": { "exists": true, "lanes": [{ "movement": "T" }], "stopControlled": false },
+        "SB": { "exists": true, "lanes": [{ "movement": "T" }], "stopControlled": false }
+      },
+      "volumes": { "AM": { "EBL": 120, "EBT": 400, "EBR": 60, "WBT": 300, "NBT": 120, "NBR": 40 }, "PM": { "EBT": 350 } },
+      "balanced": { "AM": { "EBL": 145, "EBT": 400, "EBR": 60, "WBT": 288, "NBT": 120, "NBR": 55 }, "PM": { "EBT": 350 } }
+    },
+    {
+      "id": "i2", "num": 2, "name": "Main St & 2nd Ave", "lat": 32.718, "lng": -117.16,
+      "control": "Signalized", "mainDir": "EB/WB",
+      "approaches": {
+        "EB": { "exists": true, "lanes": [{ "movement": "T" }], "stopControlled": false },
+        "WB": { "exists": true, "lanes": [{ "movement": "T" }], "stopControlled": false },
+        "NB": { "exists": true, "lanes": [{ "movement": "T" }], "stopControlled": false },
+        "SB": { "exists": true, "lanes": [{ "movement": "T" }], "stopControlled": false }
+      },
+      "volumes": { "AM": { "EBT": 460, "WBL": 60 }, "PM": { "EBT": 320 } },
+      "balanced": { "AM": { "EBT": 465, "WBL": 75 }, "PM": { "EBT": 320 } }
+    },
+    {
+      "id": "i3", "num": 3, "name": "Main St & 3rd Ave", "lat": 32.722, "lng": -117.16,
+      "control": "Signalized", "mainDir": "EB/WB",
+      "approaches": {
+        "EB": { "exists": true, "lanes": [{ "movement": "T" }], "stopControlled": false },
+        "WB": { "exists": true, "lanes": [{ "movement": "T" }], "stopControlled": false },
+        "NB": { "exists": true, "lanes": [{ "movement": "T" }], "stopControlled": false },
+        "SB": { "exists": true, "lanes": [{ "movement": "T" }], "stopControlled": false }
+      },
+      "volumes": { "AM": { "EBT": 500 }, "PM": { "EBT": 300 } },
+      "balanced": { "AM": { "EBT": 500 }, "PM": { "EBT": 300 } }
+    }
+  ],
+  "links": [
+    { "id": "l1", "fromId": "i1", "toId": "i2", "direction": "EB/WB", "mode": "Full" },
+    { "id": "l2", "fromId": "i2", "toId": "i3", "direction": "EB/WB", "mode": "Full" }
+  ],
+  "analysis": {
+    "corridorDir": "EB/WB",
+    "lastRun": {
+      "timestamp": "2026-01-01T00:00:00Z", "method": "larger",
+      "resolvedLinks": { "AM": [{ "fromNum": 1, "toNum": 2, "direction": "EB", "volume": 465, "reconciliation_delta": 5 }], "PM": [] },
+      "iterations": { "AM": {}, "PM": {} },
+      "intConverged": { "AM": { "1": true, "2": true, "3": true }, "PM": {} },
+      "finalResidual": { "AM": {}, "PM": {} },
+      "linkConservation": { "AM": [], "PM": [] },
+      "movementsReview": { "AM": [], "PM": [] },
+      "qcFlags": [],
+      "config": { "linkResolution": "larger", "peakMode": "Corridor", "amWindow": { "start": "07:00", "end": "09:00" }, "pmWindow": { "start": "16:00", "end": "18:00" }, "convergenceThreshold": 0.5, "maxIterations": 500, "corridorDir": "EB/WB" }
+    }
+  },
+  "forecasting": {
+    "baseYear": 2025, "horizonYear": 2035, "settings": {},
+    "results": {
+      "AM": {
+        "pass2": { "balanced": {
+          "1": { "EBL": 165, "EBT": 470, "EBR": 70, "WBT": 330, "NBT": 140, "NBR": 62 },
+          "2": { "EBT": 520, "WBL": 85 },
+          "3": { "EBT": 560 }
+        } },
+        "vmt": { "scenario": null, "corridor": {} }
+      },
+      "PM": {
+        "pass2": { "balanced": { "1": { "EBT": 410 } } },
+        "vmt": { "scenario": null, "corridor": {} }
+      }
+    }
+  }
+}

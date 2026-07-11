@@ -55,7 +55,35 @@ skip it.
   loudly with start instructions if either is down.
 - No dependency: `--render` drives system Chrome over the DevTools Protocol via
   Node built-ins (`scripts/render-check.mjs`). Defaults target the S6
-  `/review-movements` view; override with `--route/--root/--image`.
+  `/review-movements` view; override with `--route/--root/--image`, and for routes
+  gated on extra data or an interaction, `--seed <file>` / `--click "<text>"`.
+
+**Diagram-route coverage (run the one matching the view you touched).** All flags
+after `--render` pass through to the render check. Each renders the real diagram
+and asserts the `<img>` has pixels + zero console errors:
+
+```bash
+# S6 Review Movements — anchor diagram (default seed, eager)
+scripts/verify-frontend.sh --render
+
+# S7 Results — per-intersection diagram cards (default seed, eager)
+scripts/verify-frontend.sh --render --route /results \
+  --root .di-s7 --image ".di-s7-card__img"
+
+# F4 Future Results — existing+forecast diagrams. Needs a forecasting.results
+# slice the default seed lacks, or it renders the "Run the forecast first" empty
+# state and FALSELY passes — so seed it:
+scripts/verify-frontend.sh --render --route /forecast/results \
+  --root .di-fc --image ".di-fc-fig img" --seed scripts/fixtures/forecast.json
+
+# S8 Export — corridor line diagram, which only renders after a button click:
+scripts/verify-frontend.sh --render --route /export \
+  --root .di-s8 --image ".di-s8-corridor-preview__fig img" --click "Preview AM + PM"
+```
+
+If you add a new diagram route, add its invocation here so nobody has to
+rediscover its seed/interaction gating. All four above are proven fail-then-pass:
+breaking the response field read (`png_base64` → `png`) turns each one red.
 
 **Why this exists (do not remove the gate).** Two bugs shipped to CI/merge in the
 S6 work because every build-time check passed while the real defect was invisible
