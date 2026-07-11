@@ -1,0 +1,8 @@
+# Runtime outputs — the harness writes these while running; never committed.
+results.csv
+summary.md
+harness_errors.log
+checkpoints.log
+runs/
+failures/
+__pycache__/
