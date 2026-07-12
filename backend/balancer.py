@@ -720,14 +720,17 @@ def _adjust_leg_to_target(balanced_int, ltr_keys, raw_int, target, shared_keys=N
         if cur_sum > target:
             # Decrement: try non-shared first, then shared. Within each tier,
             # pick the largest cell that's ≥ 5 (can drop by 5 without going
-            # negative).
+            # negative). Value ties break by tier position (leg-relative L/T/R
+            # spec order), never by movement-code string: compass-labeled codes
+            # relabel under corridor rotation, so a string tie-break selects
+            # different PHYSICAL cells in different orientations (the ±5
+            # NBR/SBL orientation-swap class). Tier position maps 1:1 under
+            # rotation; max() below picks the first maximal cell in tier order,
+            # mirroring the increment branch.
             for tier in (non_shared, shared_in_leg):
-                cands = sorted(
-                    [(balanced_int[k], k) for k in tier if balanced_int[k] >= 5],
-                    reverse=True,
-                )
+                cands = [k for k in tier if balanced_int[k] >= 5]
                 if cands:
-                    balanced_int[cands[0][1]] -= 5
+                    balanced_int[max(cands, key=lambda k: balanced_int[k])] -= 5
                     break
             else:
                 return target - cur_sum     # cannot shrink further
