@@ -1,4 +1,4 @@
-# DemandIQ Examiner (v1) — closed-loop known-answer test harness
+# DemandIQ Examiner (v2) — closed-loop known-answer test harness
 
 All-night, unattended, end-to-end testing of the real DemandIQ balance
 pipeline against constructed ground truth. Per run: generate a perfectly
@@ -16,8 +16,50 @@ cd backend && python3.12 app.py &
 caffeinate -i python3.12 -m harness.loop
 
 # reproduce one run from its seed — every failure reproduces exactly
-python3.12 -m harness.run_one --seed 1234
+python3.12 -m harness.run_one --seed 1234              # Tier A (default)
+python3.12 -m harness.run_one --seed 1234 --tier C     # any other tier
 ```
+
+## Difficulty tiers (v2)
+
+The v1 config saturated (~100% pass over ~22k seeds post orientation fix),
+so the exam escalates. Puzzle generation is a pure function of
+**(seed, tier)**; every failure reproduces with `run_one --seed N --tier X`.
+
+| Tier | Intersections | Legs | Exercises |
+|---|---|---|---|
+| A (default) | 3–6 | all 4-leg | the original v1 config — byte-identical per seed, pinned by `goldens/tier_a_hashes.json` |
+| B | 5–20 | all 4-leg | error propagation down long chains |
+| C | 3–6 | seeded ~50/50 four-leg / 3-leg (T) | absent-leg handling, sparse movement sets |
+| D | 5–20 | mixed per Tier C | both at once |
+
+Tier A byte-compatibility: `generate(seed)` keeps the exact pre-tier RNG
+stream, so `run_one --seed N` with no tier reproduces what it always did.
+Tiers B–D run on their own string-seeded stream and can never perturb it.
+
+For a T-intersection the absent leg is seeded among the two **cross-street**
+legs — corridor through-legs are always present so the chain stays connected.
+Serialization matches the real frontend (`S3_ApproachConfig.jsx toggleDne`):
+the absent approach key stays present as `{exists: false, lanes: [],
+stopControlled: false}` and the absent leg's movement keys are **omitted**
+from `volumes` (never null, never 0). The answer key omits them too, and
+each corridor constraint's remainder goes to its surviving member, so key
+link conservation stays exact by construction.
+
+The loop rotates tiers per run — seeded per seed, default mix
+A 20% / B 30% / C 30% / D 20%:
+
+```bash
+python3.12 -m harness.loop                                   # default mix
+python3.12 -m harness.loop --tier-mix 'A:10,B:40,C:40,D:10'  # custom weights
+python3.12 -m harness.loop --tier B --max-runs 20            # pin one tier (soak)
+```
+
+`results.csv` has a `tier` column (pre-tier rows are migrated in place as
+Tier A — that is the config they ran); `summary.md` and the Telegram
+checkpoint/morning summary report pass rate per tier. Case files record the
+tier and the `--tier`-aware repro command, but failure **signatures stay
+tier-independent** — the same bug hit in two tiers dedups to one ledger row.
 
 Optional: `ANTHROPIC_API_KEY` enables LLM failure narration (post-verdict
 only). Without it, failures get a deterministic fallback narration — the
@@ -89,9 +131,9 @@ frozen `project.schema.json` was derived from — frontend schema drift breaks
 the build, not the harness's honesty. `harness/tests/` runs the detector
 fail-then-pass suite offline (no backend needed).
 
-## Non-goals (v1)
+## Non-goals (v2)
 
-No Mechanic/auto-fix (Phase 2). No UI driving. No golden cases yet
-(`goldens/` hook is ready). No ±30% tier, T-intersections, missing
-legs/movements, AM+PM dual-period consistency checks, or forecasting
-coverage.
+No Mechanic/auto-fix (Phase 2). No UI driving. No ±30% perturbation tier,
+no missing individual movements on present legs, no AM+PM dual-period
+consistency checks, no forecasting coverage. (v2 added: difficulty tiers
+with long corridors and T-intersections; `goldens/` now pins Tier A.)
