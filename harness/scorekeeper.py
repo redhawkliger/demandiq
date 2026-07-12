@@ -25,7 +25,7 @@ SUMMARY_MD = HARNESS_ROOT / 'summary.md'
 
 RESULTS_FIELDS = [
     'run_id', 'timestamp', 'seed', 'git_sha', 'n_intersections',
-    'orientation', 'perturb_tier', 'verdict', 'failure_category',
+    'orientation', 'perturb_tier', 'tier', 'verdict', 'failure_category',
     'signature', 'worst_geh', 'worst_movement',
 ]
 LEDGER_FIELDS = [
@@ -51,6 +51,26 @@ def make_run_id(seed):
         run_id = f'{ts}-seed{seed}-{n}'
         n += 1
     return run_id
+
+
+def migrate_results_csv():
+    """One-time in-place migration: a results.csv written before difficulty
+    tiers existed lacks the 'tier' column. Backfill those rows as Tier A —
+    that is literally the configuration they ran. Idempotent; no-op when the
+    file is absent or already migrated."""
+    if not RESULTS_CSV.exists():
+        return
+    with open(RESULTS_CSV, newline='') as f:
+        header = f.readline().strip().split(',')
+    if 'tier' in header:
+        return
+    rows = _read_csv(RESULTS_CSV)
+    for r in rows:
+        r['tier'] = 'A'
+    with open(RESULTS_CSV, 'w', newline='') as f:
+        w = csv.DictWriter(f, fieldnames=RESULTS_FIELDS)
+        w.writeheader()
+        w.writerows(rows)
 
 
 def _append_csv(path, fields, row):
@@ -83,6 +103,7 @@ def record_run(meta, grade, narration, artifacts):
     full case file + ledger update. Regenerates summary.md every run."""
     run_id = meta['run_id']
     run_dir = write_run_artifacts(run_id, artifacts)
+    migrate_results_csv()
 
     worst = grade.get('geh', {})
     row = {
@@ -93,6 +114,7 @@ def record_run(meta, grade, narration, artifacts):
         'n_intersections': meta['n'],
         'orientation': meta['orientation'],
         'perturb_tier': meta['tier'],
+        'tier': meta.get('difficulty', 'A'),
         'verdict': grade['verdict'],
         # Deterministic category only — the narrator's refinement lives in the
         # case report. Keeps results.csv/ledger rows consistent per signature.
@@ -124,7 +146,12 @@ def _write_case_file(meta, grade, narration, run_dir):
     category = grade['failure_category']
     refined = narration.get('category')
 
-    repro = f"python -m harness.run_one --seed {meta['seed']}"
+    # The difficulty tier is recorded in the case file for repro, but NEVER
+    # feeds the signature — the same bug hit in two tiers must stay one
+    # ledger row (grader.compute_signature has no tier input).
+    difficulty = meta.get('difficulty', 'A')
+    repro = f"python -m harness.run_one --seed {meta['seed']}" \
+        + (f' --tier {difficulty}' if difficulty != 'A' else '')
     report = [
         f"# Examiner failure — run `{meta['run_id']}`",
         '',
@@ -132,8 +159,9 @@ def _write_case_file(meta, grade, narration, run_dir):
         f"- **Category:** {category}"
         + (f' (narrator refinement: {refined})' if refined and refined != category else ''),
         f"- **Signature:** `{grade['signature']}`",
-        f"- **Seed:** {meta['seed']} · corridor of {meta['n']} intersections, "
-        f"{meta['orientation']} orientation, ±{int(meta['tier'] * 100)}% perturbation",
+        f"- **Seed:** {meta['seed']} · tier {difficulty} · corridor of "
+        f"{meta['n']} intersections, {meta['orientation']} orientation, "
+        f"±{int(meta['tier'] * 100)}% perturbation",
         f"- **Tool git SHA:** `{meta['git_sha']}`",
         f"- **Worst GEH:** {grade['geh']['worst']:.2f} at {grade['geh']['worst_movement']}",
         '',
@@ -141,7 +169,7 @@ def _write_case_file(meta, grade, narration, run_dir):
         '```bash',
         repro,
         '```',
-        'Deterministic: the seed regenerates the identical puzzle and answer key.',
+        'Deterministic: the (seed, tier) regenerates the identical puzzle and answer key.',
         '',
         '## Narration',
         narration.get('explanation') or '(none)',
@@ -243,8 +271,14 @@ def write_summary():
     ledger = _read_csv(LEDGER_CSV)
 
     verdicts = {'PASS': 0, 'MARGINAL': 0, 'FAIL': 0}
+    tier_stats = {}
     for r in results:
         verdicts[r['verdict']] = verdicts.get(r['verdict'], 0) + 1
+        # Rows written before the tier column existed ran the Tier A config.
+        t = r.get('tier') or 'A'
+        s = tier_stats.setdefault(t, {'PASS': 0, 'MARGINAL': 0, 'FAIL': 0, 'total': 0})
+        s[r['verdict']] = s.get(r['verdict'], 0) + 1
+        s['total'] += 1
     pass_rate = 100.0 * verdicts['PASS'] / total
 
     # Severity-ranked failure-category histogram (worst first)
@@ -282,6 +316,15 @@ def write_summary():
         f'last 50: {last50_pass}/{len(last50)} pass)',
         '',
     ]
+    lines += ['## Pass rate per tier', '',
+              '| Tier | Runs | Pass | Marginal | Fail | Pass rate |',
+              '|---|---|---|---|---|---|']
+    for t in sorted(tier_stats):
+        s = tier_stats[t]
+        rate = 100.0 * s['PASS'] / s['total']
+        lines.append(f"| {t} | {s['total']} | {s['PASS']} | {s['MARGINAL']} | "
+                     f"{s['FAIL']} | {rate:.1f}% |")
+    lines.append('')
     if ranked:
         lines.append('| Failure category (worst first) | Runs |')
         lines.append('|---|---|')

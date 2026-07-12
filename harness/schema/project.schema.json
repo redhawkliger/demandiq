@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "demandiq:project (localStorage snapshot) — Examiner puzzle subset",
-  "description": "Derived by hand from frontend/src/store/projectStore.js (snapshot shape, defaultApproach, ensureBalancingDefaults, link shape) and frontend/src/sessions/S6_RunAnalysis.jsx buildPayload (which fields the balance pipeline actually consumes). Frozen at frontend git SHA 96968a35; harness/schema/check_drift.py re-checks the source markers in CI so silent frontend drift breaks the build, not the harness's honesty.",
+  "description": "Derived by hand from frontend/src/store/projectStore.js (snapshot shape, defaultApproach, ensureBalancingDefaults, link shape) and frontend/src/sessions/S6_RunAnalysis.jsx buildPayload (which fields the balance pipeline actually consumes). Frozen at frontend git SHA 96968a35; harness/schema/check_drift.py re-checks the source markers in CI so silent frontend drift breaks the build, not the harness's honesty. lanes.minItems is 0, not 1: S3_ApproachConfig.jsx toggleDne() persists lanes: [] on an exists:false leg, so a real 3-leg project has an empty lanes array on the dropped approach.",
   "type": "object",
   "required": ["project", "analysis", "intersections", "links", "balancing"],
   "properties": {
@@ -105,7 +105,7 @@
         "stopControlled": {"type": "boolean"},
         "lanes": {
           "type": "array",
-          "minItems": 1,
+          "minItems": 0,
           "items": {
             "type": "object",
             "required": ["movement"],

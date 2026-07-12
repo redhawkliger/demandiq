@@ -47,10 +47,11 @@ def _raw_by_period(project):
     return {p: probes._raw_by_num(project, p) for p in ('AM', 'PM')}
 
 
-def execute_run(seed, base_url=operate.DEFAULT_BASE_URL):
-    """Run one seed end to end. Never raises for tool-side failures — those
-    become recorded verdicts. Returns the results.csv row dict."""
-    gen = puzzler.generate(seed)
+def execute_run(seed, base_url=operate.DEFAULT_BASE_URL, tier='A'):
+    """Run one seed end to end at a difficulty tier. Never raises for
+    tool-side failures — those become recorded verdicts. Returns the
+    results.csv row dict."""
+    gen = puzzler.generate(seed, tier=tier)
     primary = gen['primary_orientation']
     secondary = 'NS' if primary == 'EW' else 'EW'
     project = gen['projects'][primary]
@@ -61,7 +62,8 @@ def execute_run(seed, base_url=operate.DEFAULT_BASE_URL):
         'git_sha': _git_sha(),
         'n': gen['n'],
         'orientation': primary,
-        'tier': gen['tier'],
+        'tier': gen['tier'],                 # perturbation magnitude
+        'difficulty': gen['difficulty'],     # difficulty tier A|B|C|D
         'harness_version': HARNESS_VERSION,
         'base_url': base_url,
     }
@@ -159,6 +161,10 @@ def _rotate_back(vols):
 
 
 def print_row(row, file=sys.stdout):
-    print(f"[{row['run_id']}] seed={row['seed']} verdict={row['verdict']}"
+    # Tier A keeps the exact pre-tier console line; other tiers name theirs.
+    tier = row.get('tier', 'A')
+    print(f"[{row['run_id']}] seed={row['seed']}"
+          f"{' tier=' + tier if tier != 'A' else ''}"
+          f" verdict={row['verdict']}"
           f"{' category=' + row['failure_category'] if row['failure_category'] else ''}"
           f" worstGEH={row['worst_geh']}", file=file)

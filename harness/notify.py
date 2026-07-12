@@ -87,6 +87,7 @@ class SessionNotifier:
         self.session_start = now
         self.session_runs = 0
         self.verdicts = {'PASS': 0, 'MARGINAL': 0, 'FAIL': 0}
+        self.tier_stats = {}          # tier → {'runs': n, 'pass': n}
         self.category_counts = {}
         self.signature_counts = {}
         self.summary_sent = False
@@ -105,11 +106,20 @@ class SessionNotifier:
 
     # ── event intake ─────────────────────────────────────────────────────
 
+    def observe_tier(self, row):
+        """Track per-difficulty-tier pass rates for checkpoint/summary lines."""
+        tier = row.get('tier') or 'A'
+        s = self.tier_stats.setdefault(tier, {'runs': 0, 'pass': 0})
+        s['runs'] += 1
+        if row['verdict'] == 'PASS':
+            s['pass'] += 1
+
     def on_run(self, row):
         """Observe one completed run's results row."""
         try:
             self.session_runs += 1
             self.verdicts[row['verdict']] = self.verdicts.get(row['verdict'], 0) + 1
+            self.observe_tier(row)
             if row['verdict'] == 'FAIL':
                 cat = row.get('failure_category') or ''
                 if cat:
@@ -160,14 +170,25 @@ class SessionNotifier:
         sig, n = max(self.signature_counts.items(), key=lambda kv: kv[1])
         return f'{sig}×{n}'
 
+    def _per_tier_line(self):
+        if not self.tier_stats:
+            return None
+        parts = []
+        for tier in sorted(self.tier_stats):
+            s = self.tier_stats[tier]
+            parts.append(f"{tier} {100.0 * s['pass'] / s['runs']:.0f}% ({s['runs']})")
+        return 'Per tier: ' + ' · '.join(parts)
+
     def _checkpoint_text(self):
         v = self.verdicts
         cats = ' · '.join(f'{c}×{n}' for c, n in
                           sorted(self.category_counts.items(), key=lambda kv: -kv[1]))
         top = self._top_signature()
+        tiers = self._per_tier_line()
         return (f'🧪 Examiner checkpoint — {self.session_runs} runs tonight, '
                 f'{self._pass_rate():.0f}% pass '
                 f"({v.get('PASS', 0)}P/{v.get('MARGINAL', 0)}M/{v.get('FAIL', 0)}F)"
+                + (f'\n{tiers}' if tiers else '')
                 + (f'\nFails: {cats}' if cats else '')
                 + (f'\nTop signature: {top}' if top else ''))
 
@@ -193,6 +214,9 @@ class SessionNotifier:
                 f"{previous.get('pass_rate', 0.0):.0f}% pass)")
         else:
             lines.append('Trend: no previous session recorded.')
+        tiers = self._per_tier_line()
+        if tiers:
+            lines.append(tiers)
         ranked = sorted(
             self.category_counts.items(),
             key=lambda kv: (CATEGORY_ORDER.index(kv[0])

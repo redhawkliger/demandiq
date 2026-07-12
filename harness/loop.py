@@ -16,12 +16,32 @@ import time
 import traceback
 from datetime import datetime, timezone
 
-from . import operate
+from . import operate, puzzler
 from .notify import SessionNotifier
 from .runner import execute_run, print_row
 from .scorekeeper import HARNESS_ROOT
 
 ERROR_LOG = HARNESS_ROOT / 'harness_errors.log'
+
+
+def parse_tier_mix(text):
+    """Parse 'A:20,B:30,C:30,D:20' into {'A': 20, ...}. Weights are relative
+    (they need not sum to 100)."""
+    mix = {}
+    for part in text.split(','):
+        tier, _, weight = part.partition(':')
+        tier = tier.strip().upper()
+        if tier not in puzzler.TIERS:
+            raise argparse.ArgumentTypeError(
+                f'unknown tier {tier!r} in --tier-mix (expected A-D)')
+        try:
+            mix[tier] = float(weight)
+        except ValueError:
+            raise argparse.ArgumentTypeError(
+                f'bad weight for tier {tier} in --tier-mix: {weight!r}')
+    if not mix or all(w <= 0 for w in mix.values()):
+        raise argparse.ArgumentTypeError('--tier-mix needs a positive weight')
+    return mix
 
 
 def main(argv=None):
@@ -32,6 +52,11 @@ def main(argv=None):
     p.add_argument('--base-url', default=operate.DEFAULT_BASE_URL)
     p.add_argument('--sleep', type=float, default=0.0,
                    help='seconds between runs (default 0)')
+    p.add_argument('--tier', choices=puzzler.TIERS, default=None,
+                   help='pin every run to one difficulty tier (soak mode)')
+    p.add_argument('--tier-mix', type=parse_tier_mix, default=None,
+                   help="seeded per-run tier rotation weights, e.g. "
+                        "'A:20,B:30,C:30,D:20' (the default mix)")
     args = p.parse_args(argv)
 
     # Observation only: the notifier reads results rows, never influences
@@ -43,7 +68,11 @@ def main(argv=None):
     try:
         while True:
             try:
-                row = execute_run(seed, base_url=args.base_url)
+                # Tier per run: pinned via --tier, else seeded rotation over
+                # the (configurable) mix — deterministic per seed, so any run
+                # is reproducible with run_one --seed N --tier X.
+                tier = args.tier or puzzler.tier_for_seed(seed, args.tier_mix)
+                row = execute_run(seed, base_url=args.base_url, tier=tier)
                 print_row(row)
                 notifier.on_run(row)
             except KeyboardInterrupt:
