@@ -30,7 +30,8 @@ from openpyxl import Workbook
 from openpyxl.styles import Font, Alignment, PatternFill
 
 from count_agent import extract, MOVEMENTS
-from balancer import balance_nchrp, fractional_volume_flags, source_outlier_flags
+from balancer import (balance_nchrp, fractional_volume_flags,
+                      reconciliation_adjustment_flags, source_outlier_flags)
 from line_diagram import (
     render_single_diagram,
     render_diagram_grid,
@@ -363,6 +364,11 @@ async def balance_nchrp_endpoint(payload: dict):
     # these without this check.
     qc_all += source_outlier_flags(am_raw, period='AM')
     qc_all += source_outlier_flags(pm_raw, period='PM')
+    # Fix 1 — reconciliation-adjustment disclosure: flag any movement whose
+    # balanced value moved far from its raw count (the silent
+    # through-inflation class). Detection only; balanced numbers unchanged.
+    qc_all += reconciliation_adjustment_flags(am_raw, am_result['balanced'], period='AM')
+    qc_all += reconciliation_adjustment_flags(pm_raw, pm_result['balanced'], period='PM')
 
     # GEOMETRY-FALLBACK is corridor-level (geometry, not volumes) — AM and PM
     # share the same coords + links, so the flag would repeat. Dedupe by

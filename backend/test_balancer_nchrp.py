@@ -938,6 +938,111 @@ def test_f3_min_sample_size_skips_tiny_corridors():
     print(f"  test_f3_min_sample_size_skips_tiny_corridors: PASS")
 
 
+def test_recon_adjust_threshold_edges():
+    """Fix 1: RECON-ADJUST fires only when BOTH |balanced-raw| >= 30 veh AND
+    GEH(balanced, raw) >= 5. Edge cases:
+      raw 10 -> 39:  delta 29, GEH 5.86  -> no flag (abs threshold fails)
+      raw 25 -> 55:  delta 30, GEH 4.74  -> no flag (GEH threshold fails)
+      raw 21 -> 51:  delta 30, GEH 5.00  -> flag (both exactly met)"""
+    from balancer import reconciliation_adjustment_flags
+    raw = {1: mk({'EBT': 10, 'WBT': 25, 'NBT': 21})}
+    bal = {1: mk({'EBT': 39, 'WBT': 55, 'NBT': 51})}
+    flags = reconciliation_adjustment_flags(raw, bal, period='AM')
+    codes = {(f['int'], f['movement']) for f in flags}
+    assert (1, 'EBT') not in codes, f"delta 29 must not flag: {flags}"
+    assert (1, 'WBT') not in codes, f"GEH 4.74 must not flag: {flags}"
+    assert (1, 'NBT') in codes, f"delta 30 + GEH 5.0 must flag: {flags}"
+    assert len(flags) == 1
+    print("  test_recon_adjust_threshold_edges: PASS (29/5.9 no, 30/4.7 no, 30/5.0 yes)")
+
+
+def test_recon_adjust_flag_shape_and_message():
+    """Fix 1: flag shape matches the qc_flags family (check/int/period/
+    movement/message) and the message carries raw -> balanced, signed
+    percent, GEH(balanced, raw), direction word, and the review sentence.
+    Canonical trigger: seed 34093 PM int 7 WBT raw 50 -> balanced 210
+    (GEH(210, 50) = 14.0)."""
+    from balancer import reconciliation_adjustment_flags
+    raw = {7: mk({'WBT': 50})}
+    bal = {7: mk({'WBT': 210})}
+    flags = reconciliation_adjustment_flags(raw, bal, period='PM')
+    assert len(flags) == 1, f"expected exactly one flag; got {flags}"
+    f = flags[0]
+    assert f['check'] == 'RECON-ADJUST'
+    assert f['int'] == 7
+    assert f['period'] == 'PM'
+    assert f['movement'] == 'WBT'
+    msg = f['message']
+    assert 'Int 7 WBT (PM)' in msg, msg
+    assert 'raw 50' in msg and 'balanced 210' in msg, msg
+    assert '+320%' in msg, msg
+    assert 'GEH 14.0' in msg, msg
+    assert 'inflation' in msg, msg
+    assert 'Engineer review recommended' in msg, msg
+    print("  test_recon_adjust_flag_shape_and_message: PASS")
+
+
+def test_recon_adjust_flags_reductions_too():
+    """Fix 1: the check covers BOTH directions — a drop below raw beyond the
+    thresholds flags as a reduction (raw 210 -> 50: delta -160, GEH 14.0)."""
+    from balancer import reconciliation_adjustment_flags
+    raw = {2: mk({'SBT': 210})}
+    bal = {2: mk({'SBT': 50})}
+    flags = reconciliation_adjustment_flags(raw, bal, period='AM')
+    assert len(flags) == 1, f"expected exactly one flag; got {flags}"
+    msg = flags[0]['message']
+    assert 'reduction' in msg, msg
+    assert '-76%' in msg, msg
+    print("  test_recon_adjust_flags_reductions_too: PASS")
+
+
+def test_recon_adjust_ignores_zero_and_small_cells():
+    """Fix 1: raw==0 cells (balanced stays 0 per round rule) and small
+    adjustments produce no flag; a clean pass-through corridor emits none."""
+    from balancer import reconciliation_adjustment_flags
+    raw = {1: mk({'EBT': 100, 'NBL': 0})}
+    bal = {1: mk({'EBT': 105, 'NBL': 0})}
+    assert reconciliation_adjustment_flags(raw, bal, period='AM') == []
+    print("  test_recon_adjust_ignores_zero_and_small_cells: PASS")
+
+
+def test_recon_adjust_emitted_by_endpoint_with_period():
+    """Fix 1 e2e: a 2-int corridor with gross link disagreement (upstream EB
+    outflow 410 vs downstream EB approach 110, Larger resolution) forces the
+    downstream approach to inflate ~4x — the endpoint response must carry
+    RECON-ADJUST flags tagged with a period, and balanced volumes must be
+    identical to what balance_nchrp alone produces (disclosure only)."""
+    from fastapi.testclient import TestClient
+    from app import app
+    vols_am = {
+        "1": {"EBT": 400, "SBL": 5, "NBR": 5, "EBL": 20, "EBR": 20,
+              "WBL": 20, "WBT": 100, "WBR": 20, "NBL": 10, "NBT": 50,
+              "SBT": 50, "SBR": 10},
+        "2": {"EBL": 5, "EBT": 100, "EBR": 5, "WBT": 90, "NBL": 5,
+              "SBR": 5, "WBL": 10, "WBR": 10, "NBT": 40, "NBR": 10,
+              "SBL": 10, "SBT": 40},
+    }
+    payload = {
+        "intersections": [
+            {"num": 1, "name": "A", "lat": 33.0, "lng": -118.0},
+            {"num": 2, "name": "B", "lat": 33.0, "lng": -117.99},
+        ],
+        "unbalanced_volumes": {"AM": vols_am, "PM": vols_am},
+        "links": [{"fromNum": 1, "toNum": 2, "direction": "EB/WB", "mode": "Full"}],
+        "link_resolution_method": "larger",
+    }
+    client = TestClient(app)
+    r = client.post("/balance-nchrp", json=payload)
+    assert r.status_code == 200, r.text
+    data = r.json()
+    ra = [f for f in data['qc_flags'] if f['check'] == 'RECON-ADJUST']
+    assert ra, f"expected RECON-ADJUST flags on a 410-vs-110 link; got {data['qc_flags']}"
+    for f in ra:
+        assert f['period'] in ('AM', 'PM'), f
+        assert f['movement'], f
+    print(f"  test_recon_adjust_emitted_by_endpoint_with_period: PASS ({len(ra)} flags)")
+
+
 def test_valid_link_directions_still_accepted():
     """Regression guard: the validation rejects only unknown directions;
     well-formed 'EB/WB' and 'NB/SB' links continue to balance cleanly."""
@@ -991,6 +1096,11 @@ if __name__ == '__main__':
         test_f3_no_outlier_on_well_balanced_corridor,
         test_f3_abs_floor_suppresses_quiet_corridor_false_positives,
         test_f3_min_sample_size_skips_tiny_corridors,
+        test_recon_adjust_threshold_edges,
+        test_recon_adjust_flag_shape_and_message,
+        test_recon_adjust_flags_reductions_too,
+        test_recon_adjust_ignores_zero_and_small_cells,
+        test_recon_adjust_emitted_by_endpoint_with_period,
     ]
     passed = 0
     failed = 0
