@@ -1002,6 +1002,68 @@ def fractional_volume_flags(raw_volumes, period=None, eps=1e-6):
     return flags
 
 
+def reconciliation_adjustment_flags(raw_volumes, balanced, period=None,
+                                    abs_threshold_veh=30.0, geh_threshold=5.0):
+    """Fix 1 — reconciliation-adjustment disclosure (detection only, never
+    alters volumes). Flag every movement whose balanced value moved far from
+    its raw input: |balanced − raw| ≥ abs_threshold_veh AND
+    GEH(balanced, raw) ≥ geh_threshold — both must hold so small movements
+    don't spam flags. Covers BOTH directions: inflations and reductions
+    (complements the known drop-below-raw NCHRP behavior, doesn't replace it).
+
+    Why this exists: post-round link reconciliation can concentrate
+    accumulated adjacent-link disagreement onto one low-volume movement —
+    canonically the corridor through at a T-intersection, the only cell
+    shared by both adjacent link constraints — inflating it several-fold
+    while post-round link conservation still closes exactly (0.0). No
+    conservation, convergence, or residual check can see it; the balanced
+    number reads as trustworthy. See
+    harness/knowledge/diagnosis-through-inflation.md for the worked cases.
+
+    Args:
+        raw_volumes: { int_num: { movement: value } } — pre-balancing counts
+        balanced:    { int_num: { movement: value } } — final balanced output
+        period:      optional 'AM'|'PM', baked into message + 'period' key
+
+    Returns: list of {'check','int','movement','message'[,'period']} dicts,
+    ordered by int_num then standard movement order (deterministic).
+    """
+    import math
+    flags = []
+    for int_num in sorted(raw_volumes.keys()):
+        raw_int = raw_volumes[int_num] or {}
+        bal_int = (balanced or {}).get(int_num) or {}
+        for mv in MOVEMENTS:
+            raw_v = float(raw_int.get(mv, 0) or 0)
+            bal_v = float(bal_int.get(mv, 0) or 0)
+            delta = bal_v - raw_v
+            if abs(delta) < abs_threshold_veh:
+                continue
+            total = bal_v + raw_v
+            geh = math.sqrt(2.0 * delta * delta / total) if total > 0 else 0.0
+            if geh < geh_threshold:
+                continue
+            direction_word = 'inflation' if delta > 0 else 'reduction'
+            pstr = f" ({period})" if period else ""
+            pct = f"{delta / raw_v * 100.0:+.0f}%, " if raw_v > 0 else ""
+            flag = {
+                'check': 'RECON-ADJUST',
+                'int': int_num,
+                'movement': mv,
+                'message': (
+                    f"Int {int_num} {mv}{pstr}: raw {raw_v:.0f} → balanced "
+                    f"{bal_v:.0f} ({pct}GEH {geh:.1f}). Large reconciliation "
+                    f"adjustment ({direction_word}) — the balanced value is "
+                    f"driven by adjacent link targets, not the source count. "
+                    f"Engineer review recommended."
+                ),
+            }
+            if period:
+                flag['period'] = period
+            flags.append(flag)
+    return flags
+
+
 def balance_nchrp(
     raw_volumes,
     links,
