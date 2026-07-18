@@ -86,6 +86,19 @@ tool, tracked as an open ledger signature — it is NOT known-correct behavior,
 but a future Mechanic should expect the root cause at the rounding boundary,
 not in the movement mapping.
 
+## Forger corpus firewall — synthetic sheets must NEVER train the extractor
+
+Every Forger-generated PDF (`harness/forger/`) carries
+`forger-synthetic=true` in its PDF metadata (Subject and Keywords). The
+rule: **Forger sheets must never enter any extraction fine-tuning or
+reference-example corpus** (`backend/training_data.jsonl`, the labeling
+pipeline in `backend/tools/populate_labels.py`, or any future corpus) — a
+model must not be trained on its own exam, or every Forger verdict
+afterwards measures memorization instead of extraction. Anyone bulk-adding
+PDFs to a corpus must check the metadata marker first. The Forger's runs/
+and failures/ artifact dirs are gitignored, which also keeps synthetic
+sheets from being casually harvested.
+
 ## Empty-period payloads crash the endpoint (pre-existing defect, not harness scope)
 
 `/balance-nchrp` 500s (KeyError in `balance_leg_totals`) when a period has
