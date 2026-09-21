@@ -1,0 +1,26 @@
+# Render blueprint — one Docker web service serving the API and the React build.
+#
+# To deploy: push this branch, then in the Render dashboard choose
+# "New +" → "Blueprint" and point it at this repo. Render reads this file,
+# then prompts for the two secrets below (they are deliberately NOT stored here).
+#
+# The free plan sleeps after ~15 minutes idle and takes ~1 minute to wake, so
+# open the URL a few minutes before showing it to anyone. Upgrading the plan to
+# "starter" removes the sleep.
+services:
+  - type: web
+    name: demandiq
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    # Open endpoint that never requires auth — Render polls it to decide the
+    # deploy succeeded.
+    healthCheckPath: /health
+    envVars:
+      # Set in the Render dashboard; sync:false means "prompt me, never commit".
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      # When set, every route except /health requires basic auth. Set it —
+      # a public URL wired to a paid API key should not be open to the internet.
+      - key: APP_PASSWORD
+        sync: false

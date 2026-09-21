@@ -1,0 +1,24 @@
+# Keep the build context small and the image free of local-only artefacts.
+.git/
+.github/
+.claude/
+.pytest_cache/
+**/__pycache__/
+**/*.pyc
+
+# Built and installed locally; the image builds its own.
+frontend/node_modules/
+frontend/dist/
+backend/.venv-forecasting/
+
+# Large local data and dev-only trees that the running app never reads.
+Data/
+data/
+Docs/
+Test/
+harness/
+scripts/
+
+.DS_Store
+*_DEBUG.txt
+.env

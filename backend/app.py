@@ -22,7 +22,13 @@ from pathlib import Path
 
 from fastapi import FastAPI, File, UploadFile, Request, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
+from fastapi.responses import (
+    FileResponse,
+    HTMLResponse,
+    JSONResponse,
+    StreamingResponse,
+)
+from fastapi.staticfiles import StaticFiles
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.templating import Jinja2Templates
 
@@ -56,6 +62,35 @@ APP_PASSWORD = os.getenv("APP_PASSWORD")
 ALLOWED_EXT = {".xlsx", ".xls", ".pdf", ".csv"}
 
 app = FastAPI(title="DemandIQ", version="0.1.0")
+
+
+class ApiPrefixMiddleware:
+    """Production stand-in for the Vite dev proxy.
+
+    In development `frontend/vite.config.js` proxies `/api/*` to this server
+    with the `/api` stripped, so the React code calls `/api/extract` while the
+    route is registered as `/extract`. In production there is no dev server and
+    no proxy — the same calls would 404. Stripping the prefix here keeps ONE set
+    of URLs working in both places, so no frontend fetch needs a build-time base
+    and no existing route (or test) changes.
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http":
+            path = scope.get("path", "")
+            if path == "/api" or path.startswith("/api/"):
+                scope = dict(scope)
+                scope["path"] = path[len("/api"):] or "/"
+                raw = scope.get("raw_path")
+                if raw and raw.startswith(b"/api"):
+                    scope["raw_path"] = raw[len(b"/api"):] or b"/"
+        await self.app(scope, receive, send)
+
+
+app.add_middleware(ApiPrefixMiddleware)
 
 # CORS — allow the Vite React dev server (localhost:3000) to call the API.
 app.add_middleware(
@@ -94,8 +129,13 @@ app.include_router(forecasting_router, prefix="/forecast",
 
 
 # ── Routes ────────────────────────────────────────────────────────────────────
-@app.get("/", response_class=HTMLResponse, dependencies=[Depends(require_auth)])
-async def index(request: Request):
+@app.get("/legacy", response_class=HTMLResponse, dependencies=[Depends(require_auth)])
+async def legacy_index(request: Request):
+    """The original Phase A Jinja UI.
+
+    `/` now serves the React build in production (see the SPA mount at the
+    bottom of this file); this keeps the old single-page UI reachable.
+    """
     return templates.TemplateResponse(request, "index.html")
 
 
@@ -725,6 +765,44 @@ async def export_excel_endpoint(payload: dict):
 async def health():
     """Open endpoint — used by Render health checks."""
     return {"status": "ok"}
+
+
+# ── React SPA (production) ────────────────────────────────────────────────────
+# Registered LAST so every API route above wins: FastAPI matches in definition
+# order, and the catch-all below would otherwise shadow them.
+#
+# Local development does not use any of this — `npm run dev` serves the app on
+# :3000 and proxies here — so the mount is skipped when there is no build.
+DIST = Path(__file__).resolve().parent.parent / "frontend" / "dist"
+
+if (DIST / "index.html").is_file():
+    app.mount("/assets", StaticFiles(directory=DIST / "assets"), name="assets")
+
+    @app.get("/{full_path:path}", dependencies=[Depends(require_auth)])
+    async def spa(full_path: str):
+        """Serve a built file when one matches, else index.html.
+
+        The fallback is what makes a hard refresh on a client-side route like
+        /results or /export work: React Router owns those paths, the server has
+        no such route, so it must hand back the shell and let the app route.
+        """
+        candidate = (DIST / full_path).resolve()
+        # Containment check — never serve outside the build directory.
+        if candidate.is_file() and candidate.is_relative_to(DIST):
+            return FileResponse(candidate)
+        return FileResponse(DIST / "index.html")
+
+else:
+    @app.get("/", response_class=HTMLResponse)
+    async def no_build():
+        return HTMLResponse(
+            "<h1>DemandIQ API is running</h1>"
+            "<p>No frontend build found. In development the UI is served by "
+            "Vite on <a href='http://localhost:3000'>:3000</a>; to serve it "
+            "from here instead, run <code>cd frontend && npm run build</code>.</p>"
+            "<p><a href='/legacy'>Legacy UI</a> · <a href='/docs'>API docs</a></p>",
+            status_code=503,
+        )
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
