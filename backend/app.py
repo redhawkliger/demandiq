@@ -29,7 +29,8 @@ from fastapi.templating import Jinja2Templates
 from openpyxl import Workbook
 from openpyxl.styles import Font, Alignment, PatternFill
 
-from count_agent import extract, MOVEMENTS
+from count_agent import extract, MOVEMENTS, MODEL as COUNT_MODEL
+import capture
 from balancer import balance_nchrp, fractional_volume_flags, source_outlier_flags
 from line_diagram import (
     render_single_diagram,
@@ -111,16 +112,22 @@ async def extract_endpoint(files: list[UploadFile] = File(...)):
             errors.append({"file": f.filename, "error": f"Unsupported file type: {ext}"})
             continue
 
+        content = await f.read()
         with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp:
-            tmp.write(await f.read())
+            tmp.write(content)
             tmp_path = tmp.name
 
         try:
             data = extract(tmp_path, API_KEY)
             data["source_file"] = f.filename
             results.append(data)
+            # Record what the model read. Hash only — no file bytes stored.
+            capture.record_extraction(f.filename, content, result=data,
+                                      model=COUNT_MODEL)
         except Exception as e:
             errors.append({"file": f.filename, "error": str(e)})
+            capture.record_extraction(f.filename, content, error=e,
+                                      model=COUNT_MODEL)
         finally:
             try:
                 os.unlink(tmp_path)
@@ -710,6 +717,11 @@ async def export_excel_endpoint(payload: dict):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"workbook build failed: {e}")
 
+    # Export is the moment the engineer signs off on the numbers, so it is the
+    # cleanest place to record raw -> balanced -> override. Never blocks the
+    # download: record_export swallows its own failures.
+    capture.record_export(payload)
+
     safe_name = re.sub(r"[^a-zA-Z0-9_-]+", "_", name).strip("_") or "project"
 
     return StreamingResponse(
@@ -725,6 +737,17 @@ async def export_excel_endpoint(payload: dict):
 async def health():
     """Open endpoint — used by Render health checks."""
     return {"status": "ok"}
+
+
+@app.get("/capture-stats", dependencies=[Depends(require_auth)])
+async def capture_stats():
+    """How much evaluation data has accumulated.
+
+    Behind auth, and counts only — no captured values are served. Use it to
+    confirm production is actually writing (a Render instance with no
+    DATABASE_URL silently collects nothing, because its disk is ephemeral).
+    """
+    return capture.stats()
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────

@@ -11,3 +11,6 @@ frontend/dist/
 data/sandag/
 # Forecasting: isolated geo-deps virtualenv (geopandas/GDAL — dev/test only)
 backend/.venv-forecasting/
+
+# Capture layer local store (SQLite fallback; production uses DATABASE_URL)
+backend/captures.db
