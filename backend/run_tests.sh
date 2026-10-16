@@ -15,6 +15,7 @@ TESTS=(
   test_line_diagram_annotation
   test_line_diagram
   test_e2e_bodger
+  test_capture
 )
 
 fails=0

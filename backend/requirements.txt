@@ -12,3 +12,6 @@ matplotlib==3.10.9
 numpy==2.4.4
 pytest==8.3.4
 hypothesis==6.122.3
+# Capture layer: used only when DATABASE_URL is set (production). Local dev and
+# the test suite fall back to SQLite from the stdlib and never import this.
+psycopg[binary]==3.3.6
