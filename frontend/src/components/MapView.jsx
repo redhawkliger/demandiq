@@ -4,7 +4,7 @@ import L from 'leaflet'
 import { Search, X, Loader2 } from 'lucide-react'
 import { searchPhoton } from '../lib/photon'
 import { buildLinkFlows, fmtPair } from '../lib/flowMap'
-import { TILE_ATTR, currentTheme, tileUrlForTheme } from '../lib/themeTiles'
+import { TILE_ATTR, TILE_MAX_NATIVE_ZOOM, currentTheme, tileUrlForTheme } from '../lib/themeTiles'
 
 // Zoom thresholds for flow-label visibility (spec §6.7)
 const FLOW_LABEL_FADE_ZOOM = 13
@@ -526,7 +526,7 @@ export default function MapView({
       <TileLayer
         url={tileUrl}
         attribution={TILE_ATTR}
-        subdomains={['a', 'b', 'c', 'd']}
+        maxNativeZoom={TILE_MAX_NATIVE_ZOOM}
         crossOrigin="anonymous"
       />
       <TileLayerHandle onReady={onTileLayerReady} />

@@ -4,11 +4,16 @@ import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 
 import { buildCorridorSegments } from '../lib/corridorSegments'
+import { TILE_ATTR, TILE_MAX_NATIVE_ZOOM, tileUrlForTheme } from '../lib/themeTiles'
 
-const TILE_URL =
-  'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
-const TILE_ATTR =
-  '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
+// Tiles come from lib/themeTiles so this map can't drift from the others. It
+// previously hard-coded CARTO's dark_all, which was wrong twice over: that URL
+// now serves an "API KEY REQUIRED" watermark, and a fixed dark basemap sat
+// under the light themes too.
+//
+// Read once at mount rather than observed like MapView's: this map is reached
+// by navigating to S7, so a theme switched mid-view is picked up on the next
+// visit. Worth an observer here only if that ever feels wrong.
 
 const numberedIcon = (num, selected = false) =>
   L.divIcon({
@@ -191,7 +196,11 @@ export default function ResultsMap({
       zoomControl={false}
       style={{ width: '100%', height: '100%' }}
     >
-      <TileLayer url={TILE_URL} attribution={TILE_ATTR} subdomains={['a', 'b', 'c', 'd']} />
+      <TileLayer
+        url={tileUrlForTheme()}
+        attribution={TILE_ATTR}
+        maxNativeZoom={TILE_MAX_NATIVE_ZOOM}
+      />
       <ZoomControl position="bottomright" />
       <ResultsLayers
         intersections={intersections}

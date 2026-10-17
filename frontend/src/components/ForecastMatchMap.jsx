@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { MapContainer, TileLayer, ZoomControl, useMap } from 'react-leaflet'
 import L from 'leaflet'
-import { TILE_ATTR, currentTheme, tileUrlForTheme } from '../lib/themeTiles'
+import { TILE_ATTR, TILE_MAX_NATIVE_ZOOM, currentTheme, tileUrlForTheme } from '../lib/themeTiles'
 
 // Match-review map: project intersection pins + the matched SANDAG network links,
 // colored by leg status. Reuses the app's leaflet/tile/pin infrastructure but
@@ -110,7 +110,7 @@ export default function ForecastMatchMap({ intersections, matches, layer, active
       <TileLayer
         url={tileUrlForTheme(theme)}
         attribution={TILE_ATTR}
-        subdomains={['a', 'b', 'c', 'd']}
+        maxNativeZoom={TILE_MAX_NATIVE_ZOOM}
         crossOrigin="anonymous"
       />
       <ZoomControl position="bottomright" />
