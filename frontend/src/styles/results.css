@@ -315,3 +315,8 @@
   gap: 14px;
   text-align: center;
 }
+
+/* Signal Flow KPI strip between the S7 toolbar and the results body. */
+.di-s7__kpis {
+  margin: 0 16px 14px;
+}

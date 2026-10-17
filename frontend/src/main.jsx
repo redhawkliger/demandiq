@@ -3,6 +3,11 @@ import { createRoot } from 'react-dom/client'
 // themes.css must load BEFORE index.css so :root[data-theme] gates win.
 import './styles/themes.css'
 import './index.css'
+// Signal Flow: bridge aliases its token names onto DemandIQ's, so it must come
+// after themes.css (which defines the targets) and before the components that
+// read them.
+import './lib/signal-flow/bridge.css'
+import './lib/signal-flow/components.css'
 import App from './App.jsx'
 import { initTheme } from './lib/theme.js'
 

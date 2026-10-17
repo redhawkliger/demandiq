@@ -1,0 +1,73 @@
+/* Signal Flow token bridge.
+ *
+ * Signal Flow's components are written against its own token names (--bg,
+ * --fg, --go, --line, --font-body …). DemandIQ has an equivalent vocabulary
+ * under different names (--bg-base, --text-primary, --signal-green, --border,
+ * --font-sans …), themed on data-theme across four palettes.
+ *
+ * Importing signal-flow's tokens.css would have defined both vocabularies at
+ * once and collided on --surface and --font-display, which the two systems
+ * gate differently: signal-flow on prefers-color-scheme, DemandIQ on
+ * data-theme. The winner would depend on import order.
+ *
+ * So instead of a second palette, this is an alias layer: each Signal Flow
+ * token points at DemandIQ's equivalent. The useful consequence is that sf-*
+ * components inherit the ACTIVE theme — they look right under Night Traffic
+ * and Sunshine too, not only under Signal Flow. Nothing here sets a color of
+ * its own except the physical constants below.
+ *
+ * --surface and --font-display are deliberately absent: DemandIQ already
+ * defines both, with the same meaning, so the components read them directly.
+ */
+:root {
+  /* Surfaces and text */
+  --bg:         var(--bg-base);
+  --surface-2:  var(--bg-deep);
+  --line:       var(--border);
+  --fg:         var(--text-primary);
+  --muted:      var(--text-tertiary);
+
+  /* Status. Mapped to DemandIQ's signal palette, which already carries the
+     same meaning (green = acceptable, amber = caution, red = alert) and is
+     deliberately constant across themes. */
+  --go:     var(--signal-green);
+  --amber:  var(--signal-amber);
+  --stop:   var(--signal-red);
+  --info:   var(--accent);
+  --on-go:  #04140C;   /* text on a filled --go button */
+
+  /* Typography. --font-display is DemandIQ's own. */
+  --font-body: var(--font-sans);
+  --font-mono: 'Overpass Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
+  --radius: 6px;
+
+  /* ── Physical constants ────────────────────────────────────────────────
+     Road surface, paint and lamp colors are identical in every theme: a road
+     is a road at midnight and at noon, and a signal lamp is the same lamp.
+     These are the only literal colors in this file, and they come straight
+     from signal-flow's tokens.css. The motion kit reads them by name. */
+  --road:        #22282E;
+  --road-verge:  #171B1F;
+  --paint:       #E9E4D4;
+  --paint-yellow:#F2C230;
+  --car:         #B9C3CC;
+  --lamp-go:     #1EE39A;
+  --lamp-amber:  #FFB020;
+  --lamp-stop:   #FF4438;
+  --lamp-off:    #2A3138;
+}
+
+/* LOS chip colors. Defined for completeness of the component kit, but note
+   DemandIQ computes volumes and balancing, NOT control delay — it has no LOS
+   anywhere. Do not render an .sf-los chip here until a real delay source
+   (Synchro/SIDRA/HCM) exists; a letter grade invented from volumes would be
+   worse than showing none. */
+:root {
+  --los-a: #07864F; --los-b: #3D8F2E; --los-c: #7A7F0E;
+  --los-d: #9E6400; --los-e: #B8481A; --los-f: #C4261B;
+}
+:root[data-theme="night-traffic"],
+:root[data-theme="signal-flow"] {
+  --los-a: #1EE39A; --los-b: #7FD957; --los-c: #D2D63A;
+  --los-d: #FFB020; --los-e: #FF8A3D; --los-f: #FF5A4E;
+}

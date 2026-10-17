@@ -1,0 +1,100 @@
+/* Signal Flow components — vendored from redhawkliger/signal-flow v1.0.0.
+   Every class is prefixed sf- so it never collides with an app's own styles.
+
+   TWO LOCAL DELETIONS from the upstream file. Keep them when re-syncing:
+
+   1. The Google Fonts @import. Overpass and Overpass Mono are already in
+      index.html alongside the app's other faces, so importing again would be
+      a second request for the same files — and a CSS @import has to be the
+      first rule in the file, which conflicts with this header anyway.
+
+   2. The `body { background; color; font-family }` rule. DemandIQ styles its
+      own body in index.css from --bg-base/--text-primary; letting this file
+      set it from --bg/--fg too would leave the winner depending on import
+      order. The sf-* classes below are additive and conflict with nothing.
+
+   Signal Flow's token names (--bg, --fg, --go, --line, --font-body, …) are
+   defined in bridge.css, mapped onto DemandIQ's own tokens so these
+   components follow whichever of the four themes is active. */
+
+/* ---------- Base ---------- */
+.sf-mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.sf-display { font-family: var(--font-display); font-weight: 900; letter-spacing: -0.025em; line-height: 0.95; }
+.sf-eyebrow { display: flex; align-items: center; gap: 10px; font: 12px/1.2 var(--font-mono); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+
+/* ---------- Buttons ---------- */
+.sf-btn { font: 600 15px/1 var(--font-body); padding: 12px 18px 11px; border-radius: var(--radius); border: 1px solid var(--line);
+  background: var(--surface); color: var(--fg); cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; gap: 8px;
+  transition: transform .15s, border-color .15s; }
+.sf-btn:hover { transform: translateY(-1px); border-color: var(--muted); }
+.sf-btn:focus-visible { outline: 2px solid var(--go); outline-offset: 2px; }
+.sf-btn--go { background: var(--go); color: var(--on-go); border-color: transparent; }
+.sf-btn--stop { color: var(--stop); border-color: color-mix(in srgb, var(--stop) 45%, var(--line)); }
+
+/* ---------- LOS chip:  <span class="sf-los" data-los="D">D</span> ---------- */
+.sf-los { --l: var(--muted); display: inline-flex; align-items: center; justify-content: center; min-width: 30px; height: 26px; padding: 0 6px; border-radius: 4px;
+  font: 800 14px/1 var(--font-display); color: var(--l); background: color-mix(in srgb, var(--l) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--l) 45%, transparent); }
+.sf-los[data-los="A"] { --l: var(--los-a); } .sf-los[data-los="B"] { --l: var(--los-b); } .sf-los[data-los="C"] { --l: var(--los-c); }
+.sf-los[data-los="D"] { --l: var(--los-d); } .sf-los[data-los="E"] { --l: var(--los-e); } .sf-los[data-los="F"] { --l: var(--los-f); }
+
+/* ---------- KPI strip ---------- */
+.sf-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+.sf-kpi { background: var(--surface); padding: 14px 16px; display: grid; gap: 2px; }
+.sf-kpi__label { font: 11px var(--font-mono); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.sf-kpi__value { font: 800 28px/1.1 var(--font-display); font-variant-numeric: tabular-nums; }
+.sf-kpi__value small { font: 500 13px var(--font-body); color: var(--muted); margin-left: 4px; }
+
+/* ---------- Results table ---------- */
+.sf-table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+.sf-table { border-collapse: collapse; width: 100%; font-size: 14px; }
+.sf-table th, .sf-table td { padding: 10px 14px; text-align: left; border-bottom: 1px solid var(--line); }
+.sf-table th { font: 600 11px var(--font-mono); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); background: var(--surface-2); }
+.sf-table td.sf-num, .sf-table th.sf-num { text-align: right; font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.sf-table tr:last-child td { border-bottom: 0; }
+
+/* ---------- Mini signal head (phase pulse) ----------
+   <span class="sf-sig sf-sig--anim"><i></i><i></i><i></i></span>   animated
+   <span class="sf-sig" data-s="g"><i></i><i></i><i></i></span>      driven by data-s = g | y | r */
+.sf-sig { display: inline-flex; flex-direction: column; gap: 2px; padding: 3px; background: #07090B; border-radius: 4px; flex: none; }
+.sf-sig i { width: 6px; height: 6px; border-radius: 50%; background: var(--lamp-off); }
+.sf-sig--lg i { width: 8px; height: 8px; }
+.sf-sig--anim i:nth-child(1) { animation: sf-lampR 9s steps(1) infinite; }
+.sf-sig--anim i:nth-child(2) { animation: sf-lampY 9s steps(1) infinite; }
+.sf-sig--anim i:nth-child(3) { animation: sf-lampG 9s steps(1) infinite; }
+@keyframes sf-lampG { 0% { background: var(--lamp-go); box-shadow: 0 0 8px var(--lamp-go); } 55% { background: var(--lamp-off); box-shadow: none; } }
+@keyframes sf-lampY { 0% { background: var(--lamp-off); } 55% { background: var(--lamp-amber); box-shadow: 0 0 8px var(--lamp-amber); } 66% { background: var(--lamp-off); box-shadow: none; } }
+@keyframes sf-lampR { 0% { background: var(--lamp-off); } 66% { background: var(--lamp-stop); box-shadow: 0 0 8px var(--lamp-stop); } 100% { background: var(--lamp-stop); } }
+.sf-sig[data-s="g"] i:nth-child(3) { background: var(--lamp-go); box-shadow: 0 0 8px var(--lamp-go); }
+.sf-sig[data-s="y"] i:nth-child(2) { background: var(--lamp-amber); box-shadow: 0 0 8px var(--lamp-amber); }
+.sf-sig[data-s="r"] i:nth-child(1) { background: var(--lamp-stop); box-shadow: 0 0 8px var(--lamp-stop); }
+
+/* ---------- Intersection hero band ---------- */
+.sf-road { position: relative; border-radius: 10px; overflow: hidden; background: var(--road-verge); border: 1px solid var(--line); }
+.sf-road canvas { display: block; width: 100%; height: clamp(240px, 34vw, 340px); }
+.sf-chip { position: absolute; left: 12px; top: 12px; display: flex; align-items: center; gap: 10px; padding: 8px 12px 7px 8px; border-radius: 6px;
+  background: rgba(7, 9, 11, .82); color: #E6EAEE; font: 600 12px/1.2 var(--font-mono); backdrop-filter: blur(6px); }
+.sf-chip small { display: block; color: #8E9AA6; font-weight: 400; font-size: 11px; }
+
+/* ---------- Green wave monitor (bottom-right corner) ---------- */
+.sf-monitor { position: fixed; z-index: 50; right: calc(16px + env(safe-area-inset-right, 0px)); bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+  width: min(312px, calc(100vw - 32px)); background: color-mix(in srgb, var(--surface) 92%, transparent); backdrop-filter: blur(10px);
+  border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 18px 40px -18px rgba(0, 0, 0, .45); padding: 12px; color: var(--fg);
+  animation: sf-rise .7s cubic-bezier(.2, .8, .2, 1) .4s both; }
+@keyframes sf-rise { from { transform: translateY(24px); opacity: 0; } to { transform: none; opacity: 1; } }
+.sf-monitor__head { display: flex; gap: 10px; align-items: center; }
+.sf-monitor__title { font: 800 14px/1.2 var(--font-display); }
+.sf-monitor__sub { font: 11px var(--font-mono); color: var(--muted); }
+.sf-monitor__toggle { margin-left: auto; width: 28px; height: 28px; border-radius: 5px; border: 1px solid var(--line); background: transparent; color: var(--fg); cursor: pointer; font: 600 16px/1 var(--font-mono); }
+.sf-monitor canvas { display: block; width: 100%; height: 120px; margin-top: 10px; }
+.sf-monitor__foot { display: flex; justify-content: space-between; gap: 8px; font: 11px var(--font-mono); color: var(--muted); margin-top: 6px; }
+.sf-monitor--min { width: auto; padding: 8px; }
+.sf-monitor--min .sf-monitor__body, .sf-monitor--min .sf-monitor__text { display: none; }
+.sf-monitor--min .sf-monitor__toggle { margin-left: 6px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .sf-monitor { animation: none; }
+  .sf-sig--anim i { animation: none; }
+  .sf-sig--anim i:nth-child(3) { background: var(--lamp-go); }
+  .sf-btn { transition: none; }
+}

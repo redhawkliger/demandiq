@@ -334,3 +334,10 @@
   font-size: 11px;
   line-height: 1.4;
 }
+
+/* Signal Flow hero on S1 — sits between the subtitle and the form. The
+   generous bottom margin clears the figcaption, which is inside the figure
+   and would otherwise sit on the first field label. */
+.di-s1-hero {
+  margin: 20px 0 34px;
+}

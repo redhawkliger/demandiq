@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { getProjectMeta, setProjectMeta } from '../store/projectStore'
 import { THEMES, getStoredTheme, applyTheme } from '../lib/theme'
 import ThemePickerModal from '../components/ThemePickerModal'
+import SignalFlowHero from '../lib/signal-flow/SignalFlowHero'
 import '../styles/forms.css'
 
 const todayISO = () => {
@@ -120,6 +121,18 @@ export default function S1_ProjectSetup() {
       <p className="di-subtitle">
         Set up the project once. These details flow through every step.
       </p>
+
+      {/* Signal Flow's "one loud element per page". S1 is the only screen with
+          no data of its own, so it is the only one where an animation competes
+          with nothing. The caption states it is a generic cycle, not this
+          project — the rest of the app shows real volumes, and an unlabelled
+          moving intersection beside them would read as one. */}
+      <SignalFlowHero
+        className="di-s1-hero"
+        mainLabel="Φ2/Φ6 Major St"
+        sideLabel="Φ4/Φ8 Cross St"
+        caption="Generic 72 s cycle — illustration, not project data."
+      />
 
       <div className="di-form">
         <div className="di-row">

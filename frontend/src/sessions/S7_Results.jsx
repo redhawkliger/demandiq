@@ -133,6 +133,21 @@ export default function S7_Results() {
 
   const canContinue = Array.from(diagrams.values()).some((d) => d.status === 'done')
 
+  // KPI figures for the strip below the toolbar. Both are null when the run
+  // did not produce the underlying data, which the strip renders as an em dash
+  // rather than a zero.
+  const enteringTotal = intersections.reduce((sum, it) => {
+    const bal = (it.balanced || {})[period]
+    if (!bal) return sum
+    return sum + Object.values(bal).reduce(
+      (a, v) => a + (typeof v === 'number' ? v : 0), 0)
+  }, 0) || null
+
+  const convergedMap = (lastRun?.intConverged || {})[period]
+  const convergedCount = convergedMap
+    ? Object.values(convergedMap).filter(Boolean).length
+    : null
+
   return (
     <div className="di-s7">
       <div className="di-s7__toolbar">
@@ -156,6 +171,29 @@ export default function S7_Results() {
               Last run: {new Date(timestamp).toLocaleString()}
             </span>
           )}
+        </div>
+      </div>
+
+      {/* Signal Flow KPI strip — real figures only, read from the balanced
+          result for the period on screen. Entering/ for a missing value rather
+          than 0, so "not computed" never reads as "zero vehicles". */}
+      <div className="sf-kpis di-s7__kpis">
+        <div className="sf-kpi">
+          <span className="sf-kpi__label">Intersections</span>
+          <span className="sf-kpi__value">{intersections.length}</span>
+        </div>
+        <div className="sf-kpi">
+          <span className="sf-kpi__label">{period} entering volume</span>
+          <span className="sf-kpi__value">
+            {enteringTotal === null ? '—' : enteringTotal.toLocaleString()}
+            <small>veh/h</small>
+          </span>
+        </div>
+        <div className="sf-kpi">
+          <span className="sf-kpi__label">Converged</span>
+          <span className="sf-kpi__value">
+            {convergedCount === null ? '—' : `${convergedCount}/${intersections.length}`}
+          </span>
         </div>
       </div>
 
