@@ -77,3 +77,60 @@
   --border-strong:  #D6D3D1;
   color-scheme: light;
 }
+
+/* ── Signal Flow ──────────────────────────────────────────────────────────────
+ * The house theme shared across the traffic tools (repo: redhawkliger/
+ * signal-flow): asphalt surfaces, signal-lamp accents, Overpass type.
+ *
+ * Mapped onto DemandIQ's OWN token names rather than importing signal-flow's
+ * tokens.css, because the two systems collide on `--surface` and
+ * `--font-display`: signal-flow gates those on prefers-color-scheme while
+ * DemandIQ gates them on data-theme, so importing both would leave the winner
+ * depending on load order. Same palette, no fight, and the existing themes are
+ * untouched — switch away and nothing here applies.
+ *
+ * Font tokens normally live in index.css because they "don't theme". These two
+ * blocks are the exception: Overpass is not a detail of Signal Flow, it is most
+ * of what makes it recognisable, so the theme has to carry it.
+ *
+ * The palette values are signal-flow's verbatim. Accent is --info (#5AA2FF
+ * dark / #1F5FAD light) rather than --go, keeping green free to mean "go,
+ * pass, acceptable" per the theme's first rule: signal colors carry meaning
+ * only, never decoration. */
+:root[data-theme="signal-flow"] {
+  --bg-base:        #0D1013;   /* asphalt at night */
+  --bg-deep:        #090C0E;
+  --bg-elevated:    rgba(255, 255, 255, 0.02);
+  --bg-hover:       rgba(255, 255, 255, 0.04);
+  --surface:        #151A1F;
+  --accent:         #5AA2FF;
+  --accent-hover:   #82BAFF;
+  --accent-glow:    rgba(90, 162, 255, 0.08);
+  --text-primary:   #E6EAEE;
+  --text-secondary: #B2BCC6;
+  --text-tertiary:  #8E9AA6;
+  --border:         #29323B;
+  --border-strong:  #3C4854;
+  --font-sans:      'Overpass', system-ui, -apple-system, sans-serif;
+  --font-display:   'Overpass', 'Highway Gothic', 'Arial Narrow', system-ui, sans-serif;
+  color-scheme: dark;
+}
+
+:root[data-theme="signal-flow-day"] {
+  --bg-base:        #ECEEF0;   /* fresh concrete */
+  --bg-deep:        #E3E6E9;
+  --bg-elevated:    #FFFFFF;
+  --bg-hover:       rgba(0, 0, 0, 0.03);
+  --surface:        #FFFFFF;
+  --accent:         #1F5FAD;
+  --accent-hover:   #2E74C8;
+  --accent-glow:    rgba(31, 95, 173, 0.08);
+  --text-primary:   #13181D;
+  --text-secondary: #42505C;
+  --text-tertiary:  #57636F;
+  --border:         #D3D8DD;
+  --border-strong:  #B6BEC6;
+  --font-sans:      'Overpass', system-ui, -apple-system, sans-serif;
+  --font-display:   'Overpass', 'Highway Gothic', 'Arial Narrow', system-ui, sans-serif;
+  color-scheme: light;
+}

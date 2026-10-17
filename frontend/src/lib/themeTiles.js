@@ -2,8 +2,10 @@
 //
 // The corridor map's basemap follows the active palette (data-theme on the
 // documentElement, set by the S1 picker):
-//   night-traffic (dark, default) → Voyager  (warm, muted dark labels)
-//   sunshine      (light)         → Positron (clean light)
+//   night-traffic    (dark, default) → Voyager  (warm, muted dark labels)
+//   sunshine         (light)         → Positron (clean light)
+//   signal-flow      (dark)          → Voyager
+//   signal-flow-day  (light)         → Positron
 //
 // Shared by two consumers so they never disagree:
 //   - MapView.jsx        — the live map; swaps tiles on theme change.
@@ -25,9 +27,14 @@ export function currentTheme() {
   return document.documentElement.getAttribute('data-theme') || 'night-traffic'
 }
 
-// Sunshine is the only light palette → Positron. Everything else (including the
-// no-attribute default) → Voyager. Takes an explicit theme so it stays pure and
-// testable; defaults to reading the live attribute for call-site convenience.
+// Light palettes get Positron; everything else (including the no-attribute
+// default) gets Voyager. Listed explicitly rather than tested against a single
+// id so adding a light theme is one entry here — the previous `=== 'sunshine'`
+// test silently handed dark tiles to any new light palette.
+// Takes an explicit theme so it stays pure and testable; defaults to reading
+// the live attribute for call-site convenience.
+const LIGHT_THEMES = new Set(['sunshine', 'signal-flow-day'])
+
 export function tileUrlForTheme(theme = currentTheme()) {
-  return theme === 'sunshine' ? POSITRON_URL : VOYAGER_URL
+  return LIGHT_THEMES.has(theme) ? POSITRON_URL : VOYAGER_URL
 }

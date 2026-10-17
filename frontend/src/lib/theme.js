@@ -24,6 +24,18 @@ export const THEMES = [
     blurb: 'Light — crisp for daytime desk work and report screenshots.',
     swatch: { bg: '#FAFAF9', surface: '#FFFFFF', accent: '#2563EB' },
   },
+  {
+    id: 'signal-flow',
+    label: 'Signal Flow',
+    blurb: 'Dark asphalt and Overpass type — the house theme shared with CrashIQ.',
+    swatch: { bg: '#0D1013', surface: '#151A1F', accent: '#5AA2FF' },
+  },
+  {
+    id: 'signal-flow-day',
+    label: 'Signal Flow Day',
+    blurb: 'The same house theme on fresh concrete, for daylight and printing.',
+    swatch: { bg: '#ECEEF0', surface: '#FFFFFF', accent: '#1F5FAD' },
+  },
 ]
 
 const VALID = new Set(THEMES.map((t) => t.id))
